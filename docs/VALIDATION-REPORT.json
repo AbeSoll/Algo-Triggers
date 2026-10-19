@@ -1,0 +1,14 @@
+{
+  "status": "passed",
+  "checks": {
+    "original_source_copy_sha256_match": true,
+    "expected_files": 6,
+    "owned_markdown_files_checked": 5,
+    "local_markdown_links_checked": 7,
+    "unique_acceptance_requirement_ids": 35,
+    "balanced_fences": true,
+    "no_trailing_whitespace": true
+  },
+  "requirements_words": 5810,
+  "application_tests": "not applicable: documentation-only preparation"
+}

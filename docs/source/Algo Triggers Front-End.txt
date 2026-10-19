@@ -1,0 +1,471 @@
+Product Description: No-Code Brent Crude Trading Rules & Backtesting Dashboard
+1. Product vision
+The platform is a no-code trading research and alert dashboard designed for people who want to develop, test, and monitor trading ideas in ICE Brent crude oil futures and options without needing programming knowledge.
+The goal is to make algorithmic trading concepts accessible through a visual interface where users can define market conditions in plain English, combine them into trading rules, test those rules against historical market data, and activate them to monitor the market in real time.
+Instead of writing Python scripts, building custom indicators, or manually checking charts throughout the day, users can describe what they want the market to do and let the platform evaluate those conditions automatically.
+The dashboard consists of three main panels:
+Rules & Alerts: The central workspace for creating trading rules, backtesting historical conditions, managing active alerts, and reviewing triggered events.
+Market Explorer: A visual research workspace for analyzing Brent crude price movements, moving averages, and the futures curve.
+Options Lab: An options analysis workspace for exploring calls, puts, multi-leg strategies, option premiums, Greeks, and implied-volatility surfaces.
+All three panels should be connected. A user should be able to select a market instrument, identify an interesting pattern, turn that observation into a rule, test it historically, and activate it without switching to another application.
+The product should feel like a professional trading terminal, but the underlying functionality should be approachable to someone who understands markets but has never written code.
+2. Core design philosophy: trading logic without programming
+The most important part of the platform is how it translates a user's trading idea into a precise, testable condition.
+A user should be able to enter a sentence such as:
+Alert me whenever Brent crude futures fall by more than 2% within one hour, or whenever the 20-day moving average crosses below the 50-day moving average.
+The platform should translate that idea into structured rules that the user can inspect, edit, validate, and test.
+Rather than exposing programming syntax, the platform should use familiar building blocks:
+IF: What market condition needs to occur?
+AND / OR: How should multiple conditions be combined?
+THEN: What should happen when the condition is met?
+TEST: How often would this condition have occurred historically?
+ACTIVATE: Should the rule monitor incoming market data?
+REVIEW: When did the rule trigger, and what exactly happened?
+Every rule should have a readable explanation alongside its visual configuration. Users should never have to guess what a rule means or whether it is currently running.
+The platform should also distinguish between a market alert and a backtested trading strategy. A condition can generate an alert without implying that a profitable trade would have been made. If the user wants to simulate trades, the platform should separately define entries, exits, position sizing, transaction costs, and other execution assumptions.
+3. Panel One: Rules & Alerts
+Purpose: Create trading ideas, turn them into rules, backtest them, and monitor them automatically.
+The Rules & Alerts panel is the core of the entire platform. It should be designed for users who have trading ideas but do not know how to translate those ideas into code.
+The interface should make it easy to create rules from scratch, edit existing rules, run historical tests, and monitor the results. It should also provide a clear history of every triggered condition so users can understand what happened and why.
+This panel should be divided into four main sections:
+Rule Builder
+Saved Rules & Strategies
+Backtesting Workspace
+Triggered Alerts & Event History
+3.1 Rule Builder: turn trading ideas into rules
+The Rule Builder allows users to describe a market condition using plain English or construct it using visual controls.
+At the top of the section, users should see a natural-language input box with a prompt such as:
+Describe the market condition you want to monitor…
+Example:
+“Alert me when Brent futures rise by more than 1.5% within 30 minutes.”
+The system should translate the sentence into a structured rule and display it for review before the user saves it.
+If the user's description is ambiguous, the system should ask for clarification. For example, “Brent rises by 2%” could mean a 2% rise from the previous close, from the current price, or over a specified time window.
+The platform should never silently assume important trading parameters.
+A. Instrument selection
+Users first select which market they want to monitor.
+Supported instrument categories should include:
+ICE Brent crude oil futures.
+A specific futures expiry, such as December 2026.
+The front-month futures contract.
+A continuous futures series for historical chart analysis.
+Vanilla call options.
+Vanilla put options.
+Call or put spreads.
+Collars and other supported multi-leg strategies.
+When an instrument is selected, the platform should display relevant contract information, including expiry, contract specifications, and available market data.
+The distinction between a specific contract and a continuous futures series is important. A specific contract represents a tradable instrument with a defined expiry, whereas a continuous series is primarily a historical analysis construct that joins multiple contracts together.
+B. Condition builder
+Users should be able to create conditions through dropdowns, input fields, and selectable operators rather than programming syntax.
+A typical rule could look like this:
+IF
+Brent Dec-2026 futures price
+Condition
+Crosses above $85.00 per barrel
+THEN
+Record the event and send an alert
+The builder should support the following categories of conditions.
+Price conditions
+Price crosses above or below a specified level.
+Price is above or below a specified level.
+Price rises or falls by a specified amount.
+Price rises or falls by a specified percentage.
+Price reaches a new high or low over a defined lookback period.
+Price moves by a specified amount within a rolling time window.
+Technical conditions
+A short moving average crosses above or below a long moving average.
+Price crosses above or below a moving average.
+Price is a specified percentage above or below a moving average.
+A moving average changes direction or reaches a specified slope threshold, if supported by the selected calculation.
+Users should be able to configure simple moving averages (SMA) and exponential moving averages (EMA), select the period, and choose the calculation timeframe.
+Options conditions
+Option premium crosses above or below a threshold.
+Option premium rises or falls by a percentage.
+Delta, gamma, theta, or vega reaches a threshold.
+Implied volatility rises or falls by a specified number of volatility points or percentage.
+A spread or collar reaches a specified combined premium.
+A strategy's net delta, net vega, or other supported aggregate Greek crosses a threshold.
+For options, the builder must distinguish between the price of an individual option and the combined value of a multi-leg strategy.
+C. Combining multiple conditions
+A powerful feature for algo traders is the ability to combine several conditions into a single rule.
+For example:
+IF Brent futures close above $85.00
+AND the 20-day moving average is above the 50-day moving average
+AND the current contract's volume exceeds a defined threshold
+THEN trigger an alert.
+Users should be able to add conditions using visible AND and OR controls, group conditions together, and remove or reorder them.
+The interface should show a readable summary of the complete rule at all times. More complex conditions should be presented as nested visual groups rather than exposed as code.
+D. Rule frequency and trigger behavior
+Every rule should include controls for when and how it is evaluated.
+Users should choose:
+The calculation timeframe, such as 1-minute, 5-minute, hourly, or daily bars, where supported.
+Whether a condition is evaluated on every market update or only after a bar closes.
+Whether an alert fires once per crossing, once per bar, or repeatedly while the condition remains true.
+Whether the rule should reset after triggering.
+Whether to apply a cooldown period to reduce duplicate alerts.
+These settings are essential because a rule that evaluates every price update may behave differently from a rule that waits for a candle to close.
+3.2 Saved Rules & Strategies
+Every saved rule should appear in a searchable list with a clear name, instrument, condition summary, and current status.
+For example:
+Rule
+	
+Instrument
+	
+Status
+
+
+Brent breakout
+	
+Dec-2026 futures
+	
+Monitoring
+
+
+Downside momentum
+	
+Front-month futures
+	
+Monitoring
+
+
+Put premium target
+	
+Dec-2026 $80 put
+	
+Paused
+
+
+Moving-average crossover
+	
+Continuous series
+	
+Backtested
+Users should be able to create folders or tags such as Breakouts, Momentum, Options, and Mean Reversion.
+Each rule should support actions such as:
+Edit the rule.
+Duplicate it and modify the parameters.
+Run or rerun a backtest.
+Activate, pause, or disable monitoring.
+View past triggers.
+Compare different parameter settings.
+The platform should maintain a version history so that users can distinguish between the original rule and later modifications. Editing a rule should not silently alter the meaning of historical backtest results.
+3.3 Backtesting Workspace
+The Backtesting Workspace allows users to evaluate how often a rule would have triggered under historical market conditions.
+The experience should be approachable for someone who has never used a backtesting engine. Users should select a date range, choose the relevant instrument or historical series, configure the calculation frequency, and click Run Backtest.
+The platform then evaluates the rule against available historical data and produces an understandable report.
+Backtest configuration
+Users should be able to configure:
+Historical start and end dates.
+Futures contract or continuous series.
+Options expiry, strike, and strategy where relevant.
+Evaluation timeframe.
+Whether conditions use intraday prices or completed bars.
+Whether the rule is an alert-only condition or a simulated trading strategy.
+For a simulated strategy, the platform should additionally request entry and exit rules, position sizing, execution assumptions, and trading costs.
+Backtest results
+The results should be organized into four areas.
+1. Summary statistics
+Show the total number of triggers, the percentage of historical periods in which a trigger occurred, the average time between events, and the distribution of events over time.
+For simulated strategies, show additional metrics such as total return, drawdown, win rate, average gain or loss, and estimated transaction costs.
+2. Event timeline
+Every historical trigger should have a timestamp and a link to the relevant chart.
+3. Historical chart
+Overlay the rule's trigger points on the price chart. Users should be able to inspect the market before, during, and after each event.
+4. Condition diagnostics
+Show which conditions were satisfied, the actual values used, and why the rule triggered.
+For example:
+Timestamp: 14:35:00
+Futures price: $85.12/bbl
+20-period SMA: $84.90/bbl
+50-period SMA: $84.65/bbl
+Price crossover condition: Satisfied
+Moving-average condition: Satisfied
+Final result: Rule triggered
+These values are illustrative, not historical market observations.
+A crucial design requirement is to explain the limits of the test. Results depend on data coverage, contract selection, calculation settings, and assumptions. A backtest that counts alerts is not proof of profitability, and simulated performance is not a guarantee of future results.
+3.4 Triggered Alerts & Event History
+This section is the user's operational log of everything the rule engine has detected.
+Every event should record:
+Trigger timestamp, with timezone.
+Rule name and version.
+Instrument and contract expiry.
+Condition that was satisfied.
+Actual observed value and threshold.
+Relevant market price and available contextual data.
+Whether the event was historical or live.
+Notification status.
+Link to inspect the event on the chart.
+Users should be able to filter by date, instrument, rule, event type, and status.
+Selecting an event should open its details without requiring the user to rebuild the context manually. The chart should jump to the relevant time, and the rule conditions should be displayed with their values at that moment.
+The main goal of Panel One: let users go from a trading idea to a validated rule, from a validated rule to historical evidence, and from historical research to ongoing monitoring—all without writing code.
+4. Panel Two: Market Explorer
+Purpose: Help users understand market behavior, discover patterns, and develop trading ideas visually.
+The Market Explorer provides the context needed to create sensible trading rules. It should not be merely a charting widget; it should function as the visual research environment for the entire platform.
+The panel has two tabs:
+Price Chart
+Futures Curve
+The two views should share the selected market context wherever possible. If the user changes the futures expiry or date range, the relevant view should update accordingly.
+4.1 Price Chart
+The Price Chart should display historical and, where available, real-time ICE Brent futures prices.
+The design should be familiar to anyone who has used a financial charting platform, but simpler than a professional charting package overloaded with indicators and drawing tools.
+A. Chart controls
+The chart should provide controls for:
+Selecting the contract or continuous futures series.
+Switching between intraday and daily timeframes.
+Choosing a historical date range.
+Displaying candlesticks or a simple line chart.
+Zooming, panning, and moving through historical prices.
+Toggling volume, where data is available.
+Displaying the current price and the most recent data timestamp.
+Users should be able to switch contracts without losing their selected timeframe or other relevant chart preferences.
+B. Moving-average indicators
+For the initial version, I would limit technical indicators to moving averages, as you suggested.
+Users should be able to turn moving-average overlays on or off and configure their parameters.
+Supported configurations should include:
+Simple moving average (SMA).
+Exponential moving average (EMA).
+User-defined lookback periods.
+Multiple simultaneous moving averages.
+Calculation timeframe and price input, where applicable.
+For example, a user could display the 20-day and 50-day SMAs to identify trends or a 9-period and 21-period EMA on an intraday chart.
+The user should be able to click a moving average and create a rule directly from it. For example, selecting the 20-period SMA could offer actions such as Alert when price crosses this line or Alert when this average crosses another average.
+C. Rule overlays and event markers
+The chart should visualize active rules and historical trigger events.
+Examples include:
+Horizontal lines showing user-defined price thresholds.
+Moving-average crossover markers.
+Shaded regions showing when a condition was true.
+Markers indicating historical and live triggers.
+Labels showing the observed value and trigger timestamp.
+Clicking a marker should open the associated rule details and show which conditions were satisfied.
+This is one of the most important links between market research and the rule engine: users should be able to see a pattern on the chart and convert it into a testable condition with minimal effort.
+D. Historical inspection
+Users should be able to move the cursor across the chart to inspect historical prices, moving-average values, and the status of their selected rule.
+A dedicated historical replay mode could allow users to move through a period one bar at a time and see when a rule first became true. This helps beginners understand how the rule behaves, rather than simply receiving a summary statistic.
+The replay must use only information available at each historical point, so the user can see how the rule would have behaved in real time.
+4.2 Futures Curve
+The Futures Curve tab should show the market's pricing across available Brent futures expiries at a selected point in time.
+Unlike the price chart, which displays how one contract changes over time, the futures curve shows how prices differ across delivery months.
+The user should be able to see whether deferred contracts are priced above or below nearer-dated contracts, and whether the shape of the curve has changed over time.
+A. Curve visualization
+The main view should display:
+Contract expiry on the horizontal axis.
+Futures price on the vertical axis.
+A plotted point for each available expiry.
+A connecting line to show the shape of the curve.
+The selected date or timestamp.
+Hovering over a point should show the contract month, price, and relevant market-data timestamp.
+Users should be able to select a point to open the corresponding contract in the Price Chart or use it as the instrument for a new rule.
+B. Curve analysis
+The interface should make two fundamental market structures easy to understand:
+Contango: Deferred futures are priced higher than nearer-dated futures.
+Backwardation: Nearer-dated futures are priced higher than deferred futures.
+The platform should explain these terms with short contextual descriptions instead of assuming that every user already understands futures-market terminology.
+It should also allow users to examine calendar spreads, such as the price difference between two selected expiry months.
+For example, a user could monitor the difference between the first and sixth listed contract months and create a rule when that spread crosses a defined threshold.
+Potential rule conditions include:
+A selected calendar spread widens or narrows beyond a threshold.
+The front-to-second-month spread crosses a specified level.
+The slope between two selected contract months changes by a specified amount.
+A curve segment moves from contango to backwardation, according to a defined comparison.
+C. Historical curve comparison
+Users should be able to compare the current curve with curves from previous dates.
+This could help them investigate whether the market structure is unusual relative to its recent history.
+For the first version, a date selector and historical curve overlay would be sufficient. More advanced statistical analysis can come later.
+The application should also distinguish the price of each individual listed contract from any calculated spread series.
+The main goal of Panel Two: give users a visual environment where they can understand price trends and term structure, identify meaningful market conditions, and convert those observations into rules without programming.
+5. Panel Three: Options Lab
+Purpose: Explore Brent crude options, monitor option-specific conditions, construct multi-leg strategies, and analyze implied volatility.
+The Options Lab should provide an accessible interface for users who want to work with options without requiring them to understand every detail of options pricing or volatility modeling.
+The panel should have two main tabs:
+Options Ladder
+Volatility Surface
+The options ladder is the primary workspace for selecting contracts and creating alerts. The volatility surface is the analytical workspace for understanding how implied volatility differs across strikes and expiries.
+5.1 Options Ladder
+The Options Ladder should display calls and puts organized by strike, with selectable expiry and market filters.
+The layout should be recognizable to users familiar with options chains: calls on one side, strike prices in the center, and puts on the other side.
+A. Contract selection
+Users should be able to select:
+An options expiry.
+A strike or range of strikes.
+Calls, puts, or both.
+Available market-data fields.
+A specific option contract for detailed inspection.
+The available contracts should be linked to the relevant underlying Brent futures contract according to the applicable exchange contract specifications.
+The interface should show the contract's underlying reference, expiry, strike, and option type so users know exactly what they are monitoring.
+B. Option market data
+Each option row should show relevant market information, subject to data availability:
+Bid and ask prices.
+Last traded price.
+Bid-ask spread.
+Implied volatility.
+Delta.
+Gamma.
+Theta.
+Vega.
+Open interest and volume, where available.
+Users should be able to customize which columns are visible, keeping the interface simple by default while allowing more experienced users to display additional information.
+The platform should clearly label stale or unavailable quotes. Greeks and implied volatility are only as reliable as their underlying market data and calculation assumptions.
+C. Creating option alerts
+Users should be able to select an option and create a rule directly from its row.
+For example:
+“Alert me when the December 2026 $80 Brent put premium rises above $2.00 per barrel.”
+Other examples include:
+Alert when a call's delta exceeds 0.60.
+Alert when implied volatility rises above a specified level.
+Alert when vega exceeds a threshold.
+Alert when the bid-ask spread becomes wider than a specified amount.
+Alert when an option premium changes by a certain percentage over a selected interval.
+The system should fill in the selected contract automatically and let the user configure the remaining condition.
+For every premium-based rule, the user should be able to choose the relevant price field—such as bid, ask, last, or a defined mark price—where supported. This is important because the same option can satisfy a threshold on one field but not another.
+5.2 Multi-leg strategy builder
+The Options Lab should also support users who want to monitor strategies rather than individual options.
+For the initial product, the core strategies should be:
+Vanilla calls and puts
+A single option contract with a selected expiry and strike.
+Vertical spreads
+Two options of the same type and expiry but with different strikes, such as a call spread or put spread.
+Collars
+A defined combination of an underlying position and options intended to establish an upside and downside price boundary, according to the selected legs.
+The platform should use a visual strategy builder that allows users to add or remove legs and define each leg's contract, option type, strike, expiry, and quantity.
+The system should then calculate the combined strategy metrics where supported, including net premium, net Greeks, and the strategy's sensitivity to changes in the underlying price and implied volatility.
+For example, a user might create a put spread and ask for an alert when its combined mark value reaches a target, or when its net delta crosses a threshold.
+The platform should explain whether premiums represent a debit or a credit and clearly show the sign conventions used for the strategy's Greeks.
+Strategy-level rules
+Once a strategy is configured, the user should be able to create conditions such as:
+Combined strategy premium rises above or falls below a target.
+Net delta reaches a specified value.
+Net vega exceeds a threshold.
+Implied volatility changes by a specified amount.
+A selected leg reaches a target premium.
+This allows users to monitor the behavior of the whole structure instead of tracking each leg independently.
+5.3 Three-dimensional Implied Volatility Surface
+The Volatility Surface tab should visualize implied volatility across strikes and expiries.
+The purpose is to help users understand how the options market prices uncertainty at different points along the strike and maturity dimensions.
+The 3D chart should have:
+X-axis: Strike price or moneyness.
+Y-axis: Time to expiry.
+Z-axis: Implied volatility.
+The user should be able to rotate the surface, zoom in, and hover over individual points to inspect the associated strike, expiry, and implied volatility.
+A. Surface controls
+Users should be able to:
+Select the underlying futures reference.
+Choose a snapshot timestamp.
+Filter the expiry range.
+Change between strike and moneyness views.
+Inspect individual points and their underlying quotes.
+Compare two historical snapshots, where suitable historical data is available.
+The chart should be accompanied by a clear timestamp so users know when the surface was calculated.
+B. Understanding volatility patterns
+The interface should help users interpret the shape of the surface.
+For example, users might observe that implied volatility is higher for lower-strike puts than for comparable higher-strike calls, or that near-term options are priced differently from longer-dated options.
+The platform should provide concise explanations of concepts such as volatility skew, smile, and term structure when users hover over a help icon.
+The aim is to make the surface useful to both experienced options traders and users who are still learning volatility concepts.
+C. Volatility-based alerts
+The surface should eventually support rules that monitor changes in implied volatility rather than only individual option prices.
+Examples include:
+Alert when the implied volatility of a selected option rises above a threshold.
+Alert when the volatility difference between two strikes widens beyond a defined level.
+Alert when the implied-volatility spread between two expiries crosses a threshold.
+These rules should be evaluated using explicitly defined option quotes, calculation methods, and timestamps.
+The first release can focus on visualization and single-option volatility alerts. More advanced surface-based rules can be added once the underlying data and calculation methodology are reliable.
+The main goal of Panel Three: make options monitoring and volatility analysis accessible through visual contract selection, readable strategy definitions, and rules that do not require programming.
+6. How the three panels work together
+The most important feature of the dashboard is that the panels share context instead of operating independently.
+A typical workflow should look like this:
+Step 1 — Discover
+The user opens the Price Chart and notices that Brent futures are approaching a key price level while the short-term moving average is approaching the long-term moving average.
+Step 2 — Create a rule
+The user selects the moving averages and defines a crossover condition through the visual builder, optionally adding a price threshold or another condition.
+Step 3 — Backtest
+The user chooses a historical date range and runs the rule. The platform shows how often it triggered, when it triggered, and the market conditions surrounding those events.
+Step 4 — Activate
+After reviewing the results, the user enables live monitoring. The system evaluates new market data and records matching events.
+Step 5 — Review and refine
+When an alert triggers, the user opens the event, reviews the exact condition values on the chart, and adjusts the rule if necessary. A changed rule can be saved as a new version and tested again.
+The same workflow should apply to options. A user could identify a volatility pattern in the surface, select an option in the ladder, create a premium or Greek alert, test the condition using historical option data, and activate it for future monitoring.
+7. Shared usability requirements
+Because the platform is intended for users without coding knowledge, every panel should follow a consistent set of design principles.
+Progressive complexity. Show the essential settings first. Advanced parameters should be available through expandable sections rather than cluttering the default interface.
+Readable rules. Every rule should have a plain-English summary that reflects its actual configured logic.
+Validation before activation. The platform should identify missing parameters, unsupported combinations, unavailable data, and ambiguous conditions before a rule can be activated.
+Transparent calculations. Users should be able to inspect the price fields, timeframes, moving-average definitions, and option valuation assumptions used in each result.
+Reproducible backtests. Each test should record its data range, rule version, instrument, evaluation settings, and relevant assumptions.
+Clear separation of historical and live data. Every view and event should identify whether it is historical, simulated, delayed, or real-time.
+Actionable explanations. Instead of displaying only “Rule triggered,” the platform should explain which condition was met and provide the values that caused the trigger.
+No hidden execution. The initial product should monitor and alert, not automatically place trades. Automated order execution could be considered as a separate future capability with its own permissions, risk controls, and testing requirements.
+8. Recommended MVP scope
+To keep the first release focused, I would prioritize features according to the core promise: allowing users to create, backtest, and monitor trading rules without coding.
+Component
+	
+Initial release
+	
+Later enhancement
+
+
+Rule Builder
+	
+Plain English plus visual if/then conditions
+	
+More advanced condition grouping
+
+
+Futures rules
+	
+Price levels, percentage moves, SMA/EMA crossovers
+	
+More complex multi-condition rules
+
+
+Backtesting
+	
+Historical trigger replay and event statistics
+	
+Full trade simulation and portfolio metrics
+
+
+Alert monitoring
+	
+Trigger history, pause/resume, notifications
+	
+More delivery channels and advanced routing
+
+
+Price Chart
+	
+Candles, moving averages, rule markers
+	
+More charting and research tools
+
+
+Futures Curve
+	
+Listed expiries and calendar spreads
+	
+Historical curve analytics
+
+
+Options Ladder
+	
+Calls, puts, premiums, basic Greeks
+	
+Advanced filtering and strategy analytics
+
+
+Strategy Builder
+	
+Vertical spreads and collars
+	
+Additional multi-leg structures
+
+
+Volatility Surface
+	
+3D implied-volatility visualization
+	
+Historical surface comparison and surface-based alerts
+The most important prerequisite is obtaining properly licensed ICE Brent futures and options data with sufficient historical coverage. Futures alerts and backtests can be developed independently of options analytics, but reliable historical options backtesting requires historical option-level prices or quotes and a defined approach to calculating implied volatility and Greeks.
+9. Final product positioning
+The platform should be positioned as a no-code research, backtesting, and alerting terminal for Brent crude futures and options.
+Its main differentiator is not the charting, options ladder, or alerts in isolation. It is the ability to connect all of them through one accessible workflow.
+A user should be able to identify a market pattern, express it in plain English, convert it into a precise rule, test it against historical data, and monitor it going forward—all within the same dashboard.
+That is what makes the product valuable to traders who want to use systematic, algorithmic approaches without first having to become programmers.
