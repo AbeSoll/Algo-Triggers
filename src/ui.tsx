@@ -74,12 +74,23 @@ export const money = (value: number) =>
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
-export const timestamp = (value: number) =>
+export const getLocalTzLabel = (): string => {
+  const offsetMin = -new Date().getTimezoneOffset();
+  const sign = offsetMin >= 0 ? "+" : "-";
+  const hours = Math.floor(Math.abs(offsetMin) / 60);
+  const mins = Math.abs(offsetMin) % 60;
+  return `UTC${sign}${hours}${mins ? `:${mins}` : ""}`;
+};
+
+export const timestamp = (
+  value: number,
+  tz: "UTC" | "utc" | "local" = "UTC",
+) =>
   new Date(value).toLocaleString("en-GB", {
     day: "2-digit",
     month: "short",
     hour: "2-digit",
     minute: "2-digit",
-    timeZone: "UTC",
+    timeZone: tz.toLowerCase() === "utc" ? "UTC" : undefined,
     hour12: false,
   });

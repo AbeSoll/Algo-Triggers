@@ -12,7 +12,7 @@ import {
 import { ArrowUpRight, BarChart3, Minus, Plus } from "lucide-react";
 import { sma, ema } from "./domain";
 import type { Bar, Condition, TriggerEvent } from "./types";
-import { money, timestamp } from "./ui";
+import { money, timestamp, getLocalTzLabel } from "./ui";
 
 export default function PriceChart({
   bars,
@@ -45,16 +45,38 @@ export default function PriceChart({
   const [table, setTable] = useState(false);
   const [period, setPeriod] = useState(ruleCondition?.period ?? 20);
   const [slow, setSlow] = useState(ruleCondition?.slowPeriod ?? 50);
+  const [tzMode, setTzMode] = useState<"utc" | "local">(() => {
+    return (
+      (localStorage.getItem("algo_triggers_chart_tz") as "utc" | "local") ||
+      "local"
+    );
+  });
+  const localTzLabel = useMemo(() => getLocalTzLabel(), []);
+
+  const handleTzChange = (mode: "utc" | "local") => {
+    setTzMode(mode);
+    try {
+      localStorage.setItem("algo_triggers_chart_tz", mode);
+    } catch {}
+  };
+
   const history = allBars ?? bars;
   const indicatorValues = useMemo(
     () => [period, slow].map((p) => (maKind === "SMA" ? sma : ema)(history, p)),
     [history, period, slow, maKind],
   );
   const current = inspected ?? bars.at(-1);
+
   useEffect(() => {
     if (!container.current || !bars.length) return;
     const styles = getComputedStyle(document.documentElement);
     const color = (name: string) => styles.getPropertyValue(name).trim();
+
+    const offsetSec =
+      tzMode === "local" ? -new Date().getTimezoneOffset() * 60 : 0;
+    const toChartTime = (timeMs: number) =>
+      Math.floor(timeMs / 1000 + offsetSec) as UTCTimestamp;
+
     const instance = createChart(container.current, {
       autoSize: true,
       height: 350,
@@ -91,10 +113,15 @@ export default function PriceChart({
         },
       },
       localization: {
-        timeFormatter: (time: number | string | object) =>
-          typeof time === "number"
-            ? timestamp(time * 1000) + " UTC"
-            : String(time),
+        timeFormatter: (time: number | string | object) => {
+          if (typeof time === "number") {
+            const rawTime = (time - offsetSec) * 1000;
+            return tzMode === "local"
+              ? `${timestamp(rawTime, "local")} (${localTzLabel})`
+              : `${timestamp(rawTime, "UTC")} UTC`;
+          }
+          return String(time);
+        },
       },
     });
     chart.current = instance;
@@ -114,7 +141,7 @@ export default function PriceChart({
     if (kind === "candles")
       series.setData(
         bars.map((b) => ({
-          time: (b.time / 1000) as UTCTimestamp,
+          time: toChartTime(b.time),
           open: b.open,
           high: b.high,
           low: b.low,
@@ -124,7 +151,7 @@ export default function PriceChart({
     else
       series.setData(
         bars.map((b) => ({
-          time: (b.time / 1000) as UTCTimestamp,
+          time: toChartTime(b.time),
           value: b.close,
         })),
       );
@@ -154,7 +181,7 @@ export default function PriceChart({
               ? []
               : [
                   {
-                    time: (b.time / 1000) as UTCTimestamp,
+                    time: toChartTime(b.time),
                     value: values[index]!,
                   },
                 ],
@@ -170,7 +197,7 @@ export default function PriceChart({
     createSeriesMarkers(
       series,
       unique.map((e) => ({
-        time: (e.time / 1000) as UTCTimestamp,
+        time: toChartTime(e.time),
         position: "aboveBar" as const,
         color: color("--primary"),
         shape: "circle" as const,
@@ -179,24 +206,24 @@ export default function PriceChart({
     );
     instance.subscribeCrosshairMove((p) => {
       if (typeof p.time === "number") {
+        const rawTime = (Number(p.time) - offsetSec) * 1000;
         setInspected(
-          bars.find((b) => b.time === Number(p.time) * 1000) ?? null,
+          bars.find((b) => b.time === rawTime) ?? null,
         );
       } else setInspected(null);
     });
     instance.subscribeClick((p) => {
       if (typeof p.time === "number") {
-        const event = matching.find((e) => e.time === Number(p.time) * 1000);
+        const rawTime = (Number(p.time) - offsetSec) * 1000;
+        const event = matching.find((e) => e.time === rawTime);
         if (event) onEvent(event);
       }
     });
     instance.timeScale().fitContent();
     if (selectedEvent && validTimes.has(selectedEvent.time)) {
       instance.timeScale().setVisibleRange({
-        from: (Math.max(bars[0].time, selectedEvent.time - 12 * 3600000) /
-          1000) as UTCTimestamp,
-        to: (Math.min(bars.at(-1)!.time, selectedEvent.time + 6 * 3600000) /
-          1000) as UTCTimestamp,
+        from: toChartTime(Math.max(bars[0].time, selectedEvent.time - 12 * 3600000)),
+        to: toChartTime(Math.min(bars.at(-1)!.time, selectedEvent.time + 6 * 3600000)),
       });
     }
     return () => {
@@ -216,6 +243,8 @@ export default function PriceChart({
     slow,
     selectedEvent,
     onEvent,
+    tzMode,
+    localTzLabel,
   ]);
   const zoom = (ratio: number) => {
     const scale = chart.current?.timeScale();
@@ -291,32 +320,53 @@ export default function PriceChart({
             </>
           )}
         </div>
-        <div className="chart-zoom">
-          <button
-            className="icon-button"
-            aria-label="Zoom out chart"
-            onClick={() => zoom(1.3)}
-          >
-            <Minus size={15} />
-          </button>
-          <button
-            className="icon-button"
-            aria-label="Zoom in chart"
-            onClick={() => zoom(0.7)}
-          >
-            <Plus size={15} />
-          </button>
-          <button
-            className="text-button"
-            onClick={() => chart.current?.timeScale().fitContent()}
-          >
-            Fit
-          </button>
+        <div className="chart-actions">
+          <div className="chart-tz-switch" role="group" aria-label="Chart timezone">
+            <button
+              type="button"
+              className={`tz-toggle-btn ${tzMode === "utc" ? "active" : ""}`}
+              onClick={() => handleTzChange("utc")}
+              title="Display in Exchange UTC (London/ICE standard)"
+            >
+              UTC
+            </button>
+            <button
+              type="button"
+              className={`tz-toggle-btn ${tzMode === "local" ? "active" : ""}`}
+              onClick={() => handleTzChange("local")}
+              title={`Display in your local time (${localTzLabel})`}
+            >
+              Local ({localTzLabel})
+            </button>
+          </div>
+          <div className="chart-zoom">
+            <button
+              className="icon-button"
+              aria-label="Zoom out chart"
+              onClick={() => zoom(1.3)}
+            >
+              <Minus size={15} />
+            </button>
+            <button
+              className="icon-button"
+              aria-label="Zoom in chart"
+              onClick={() => zoom(0.7)}
+            >
+              <Plus size={15} />
+            </button>
+            <button
+              className="text-button"
+              onClick={() => chart.current?.timeScale().fitContent()}
+            >
+              Fit
+            </button>
+          </div>
         </div>
       </div>
       <div className="ohlc" aria-live="off">
         <span>
-          {current ? timestamp(current.time) : "No bars"} <small>UTC</small>
+          {current ? timestamp(current.time, tzMode) : "No bars"}{" "}
+          <small>{tzMode === "local" ? localTzLabel : "UTC"}</small>
         </span>
         {current &&
           (["open", "high", "low", "close"] as const).map((field, i) => (
@@ -352,7 +402,9 @@ export default function PriceChart({
         <div className="chart-note">
           <span className="dot purple" />
           Rule events <span className="separator">/</span>
-          <span>Synthetic data · USD/bbl</span>
+          <span>
+            {tzMode === "local" ? `Local time (${localTzLabel})` : "Exchange UTC"} · ~10–15m delay · USD/bbl
+          </span>
         </div>
         <button className="text-button" onClick={() => setTable(!table)}>
           <BarChart3 size={14} />
@@ -380,11 +432,11 @@ export default function PriceChart({
         <div className="table-wrap chart-data">
           <table>
             <caption>
-              Last 20 displayed bars, UTC. For all bars, use the CSV export.
+              Last 20 displayed bars ({tzMode === "local" ? localTzLabel : "UTC"}). For all bars, use the CSV export.
             </caption>
             <thead>
               <tr>
-                <th>Time</th>
+                <th>Time ({tzMode === "local" ? localTzLabel : "UTC"})</th>
                 <th>Open</th>
                 <th>High</th>
                 <th>Low</th>
@@ -394,7 +446,7 @@ export default function PriceChart({
             <tbody>
               {bars.slice(-20).map((b) => (
                 <tr key={b.time}>
-                  <td>{timestamp(b.time)}</td>
+                  <td>{timestamp(b.time, tzMode)}</td>
                   <td>{money(b.open)}</td>
                   <td>{money(b.high)}</td>
                   <td>{money(b.low)}</td>
