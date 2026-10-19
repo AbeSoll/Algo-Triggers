@@ -41,4 +41,8 @@ Machine-readable reports: `browser-results.json`, `premium-audit.json`, `design-
 
 The dev preview was observed in the in-app browser. Native contract selector open state was inspected. Automated scans and selected browser journeys are not complete assistive-technology certification, production load testing or proof of market-data accuracy. No server, real feed, options-history provider or external delivery integration was tested.
 
-The source changes remain local and have not been committed or pushed during this frontend task. The repository's previously pushed requirements commit is unchanged.
+Git history records publication of the frontend and subsequent UI refinements. The previously published requirements and frontend commits are preserved.
+
+## Pre-push refresh for the UI refinements
+
+Type checks, all 36 calculation tests and the production build passed again. The default four-worker browser run passed 15 journeys; two accessibility/browser journeys exceeded their 30-second timeout. Both passed when rerun individually with one worker (5.4 and 4.8 seconds). All 17 scenarios therefore passed across the refresh and targeted rerun; the parallel run itself was not an all-pass result. The original machine-readable report above is retained as evidence of the initial frontend verification.

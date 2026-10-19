@@ -61,13 +61,13 @@ export default function PriceChart({
       layout: {
         background: { type: ColorType.Solid, color: color("--surface") },
         textColor: color("--muted"),
-        fontFamily: "Consolas, monospace",
+        fontFamily: "'Consolas', ui-monospace, monospace",
         fontSize: 11,
         attributionLogo: true,
       },
       grid: {
-        vertLines: { color: "#f0f2f5" },
-        horzLines: { color: "#edf0f3" },
+        vertLines: { color: "rgba(224,230,236,0.6)" },
+        horzLines: { color: "rgba(224,230,236,0.9)" },
       },
       rightPriceScale: {
         borderVisible: false,
@@ -80,11 +80,13 @@ export default function PriceChart({
       },
       crosshair: {
         vertLine: {
-          color: color("--muted"),
+          color: "rgba(98,81,216,0.5)",
           labelBackgroundColor: color("--ink"),
+          width: 1,
+          style: LineStyle.Dashed,
         },
         horzLine: {
-          color: color("--muted"),
+          color: "rgba(98,81,216,0.5)",
           labelBackgroundColor: color("--ink"),
         },
       },

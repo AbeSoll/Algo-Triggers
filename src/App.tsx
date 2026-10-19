@@ -1752,10 +1752,41 @@ function Curve({
   const validPair =
     instruments.findIndex((i) => i.id === near) <
     instruments.findIndex((i) => i.id === far);
-  const maxPrice = Math.max(...prices.map((p) => p.price)) + 0.2;
-  const minPrice = Math.min(...prices.map((p) => p.price)) - 0.2;
-  const y = (price: number) =>
-    35 + ((maxPrice - price) / (maxPrice - minPrice)) * 150;
+  const maxPrice = Math.max(...prices.map((p) => p.price)) + 0.8;
+  const minPrice = Math.min(...prices.map((p) => p.price)) - 0.8;
+  const W = 700,
+    H = 260,
+    PAD_L = 58,
+    PAD_R = 30,
+    PAD_T = 40,
+    PAD_B = 50;
+  const chartW = W - PAD_L - PAD_R;
+  const chartH = H - PAD_T - PAD_B;
+  const n = prices.length;
+  const xOf = (i: number) => PAD_L + (i / (n - 1)) * chartW;
+  const yOf = (price: number) =>
+    PAD_T + ((maxPrice - price) / (maxPrice - minPrice)) * chartH;
+  const pts = prices.map((p, i) => ({ x: xOf(i), y: yOf(p.price) }));
+  const pathD = pts.reduce((acc, pt, i) => {
+    if (i === 0) return `M ${pt.x},${pt.y}`;
+    const prev = pts[i - 1];
+    const cpx = prev.x + (pt.x - prev.x) * 0.5;
+    return `${acc} C ${cpx},${prev.y} ${cpx},${pt.y} ${pt.x},${pt.y}`;
+  }, "");
+  const areaD = `${pathD} L ${pts[n - 1].x},${PAD_T + chartH} L ${PAD_L},${PAD_T + chartH} Z`;
+  const isBackwardation = diff > 0;
+  const strokeColor = isBackwardation ? "#c0404e" : "#0a8c73";
+  const gradId = isBackwardation ? "cvred" : "cvgreen";
+  const gradStart = isBackwardation
+    ? "rgba(192,64,78,0.22)"
+    : "rgba(10,140,115,0.18)";
+  const gradEnd = isBackwardation
+    ? "rgba(192,64,78,0.01)"
+    : "rgba(10,140,115,0.01)";
+  const glowColor = isBackwardation
+    ? "rgba(192,64,78,0.3)"
+    : "rgba(10,140,115,0.3)";
+  const gridCount = 4;
   return (
     <div className="curve-view">
       <div className="curve-summary">
@@ -1783,69 +1814,150 @@ function Curve({
             )}
           </p>
         </div>
-        <strong>
+        <strong className={isBackwardation ? "down" : "up"}>
           {diff >= 0 ? "+" : ""}
           {diff.toFixed(2)}
           <small>USD/bbl · near − far</small>
         </strong>
       </div>
       <svg
-        viewBox="0 0 700 240"
+        viewBox={`0 0 ${W} ${H}`}
         role="img"
         aria-label="Synthetic futures curve. Three prices are listed with contract actions below."
+        style={{ overflow: "visible" }}
       >
-        {[0, 1, 2, 3].map((i) => (
-          <g key={i}>
-            <line
-              x1="50"
-              x2="660"
-              y1={35 + i * 50}
-              y2={35 + i * 50}
-              stroke="var(--border)"
-            />
-            <text x="10" y={39 + i * 50} fill="var(--muted)" fontSize="12">
-              {(maxPrice - ((maxPrice - minPrice) * i) / 3).toFixed(2)}
-            </text>
-          </g>
-        ))}
-        <path
-          d={prices
-            .map((p, i) => `${i ? "L" : "M"} ${100 + i * 250},${y(p.price)}`)
-            .join(" ")}
-          fill="none"
-          stroke="var(--primary)"
-          strokeWidth="3"
+        <defs>
+          <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={gradStart} />
+            <stop offset="100%" stopColor={gradEnd} />
+          </linearGradient>
+          <filter id="gn">
+            <feGaussianBlur stdDeviation="3" result="b" />
+            <feMerge>
+              <feMergeNode in="b" />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
+          </filter>
+          <filter id="gl">
+            <feGaussianBlur stdDeviation="2.5" result="b" />
+            <feMerge>
+              <feMergeNode in="b" />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
+          </filter>
+        </defs>
+        {Array.from({ length: gridCount + 1 }, (_, i) => {
+          const price = maxPrice - ((maxPrice - minPrice) * i) / gridCount;
+          const yg = yOf(price);
+          return (
+            <g key={i}>
+              <line
+                x1={PAD_L}
+                x2={W - PAD_R}
+                y1={yg}
+                y2={yg}
+                stroke={i === 0 ? "transparent" : "#e8ecf2"}
+                strokeWidth="1"
+                strokeDasharray="4 5"
+              />
+              <text
+                x={PAD_L - 8}
+                y={yg + 4}
+                fill="#8fa4b0"
+                fontSize="10"
+                textAnchor="end"
+                fontFamily="Consolas, monospace"
+              >
+                {price.toFixed(2)}
+              </text>
+            </g>
+          );
+        })}
+        <line
+          x1={PAD_L}
+          x2={W - PAD_R}
+          y1={PAD_T + chartH}
+          y2={PAD_T + chartH}
+          stroke="#d4dbe3"
+          strokeWidth="1"
         />
-        {prices.map((p, i) => (
-          <g key={p.id}>
-            <circle
-              cx={100 + i * 250}
-              cy={y(p.price)}
-              r="6"
-              fill="var(--surface)"
-              stroke="var(--primary)"
-              strokeWidth="3"
-            />
-            <text
-              x={100 + i * 250}
-              y="220"
-              textAnchor="middle"
-              fill="var(--muted)"
-              fontSize="12"
-            >
-              {p.short}
-            </text>
-            <text
-              x={100 + i * 250}
-              y={y(p.price) - 18}
-              textAnchor="middle"
-              fill="var(--ink)"
-              fontSize="13"
-            >
-              {money(p.price)}
-            </text>
-          </g>
-        ))}
+        <path d={areaD} fill={`url(#${gradId})`} />
+        <path
+          d={pathD}
+          fill="none"
+          stroke={strokeColor}
+          strokeWidth="2.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          filter="url(#gl)"
+          opacity="0.45"
+        />
+        <path
+          d={pathD}
+          fill="none"
+          stroke={strokeColor}
+          strokeWidth="2.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        {prices.map((p, i) => {
+          const cx = xOf(i),
+            cy = yOf(p.price);
+          return (
+            <g key={p.id}>
+              <circle cx={cx} cy={cy} r="11" fill={glowColor} opacity="0.35" />
+              <circle
+                cx={cx}
+                cy={cy}
+                r="6"
+                fill="white"
+                stroke={strokeColor}
+                strokeWidth="2.5"
+                filter="url(#gn)"
+              />
+              <circle cx={cx} cy={cy} r="2.5" fill={strokeColor} />
+              <rect
+                x={cx - 27}
+                y={cy - 37}
+                width="54"
+                height="20"
+                rx="5"
+                fill={
+                  isBackwardation
+                    ? "rgba(192,64,78,0.07)"
+                    : "rgba(10,140,115,0.07)"
+                }
+                stroke={
+                  isBackwardation
+                    ? "rgba(192,64,78,0.18)"
+                    : "rgba(10,140,115,0.18)"
+                }
+                strokeWidth="1"
+              />
+              <text
+                x={cx}
+                y={cy - 23}
+                textAnchor="middle"
+                fill={strokeColor}
+                fontSize="11"
+                fontWeight="600"
+                fontFamily="Consolas, monospace"
+              >
+                {money(p.price)}
+              </text>
+              <text
+                x={cx}
+                y={PAD_T + chartH + 22}
+                textAnchor="middle"
+                fill="#5b6b77"
+                fontSize="11"
+                fontWeight="500"
+              >
+                {p.short}
+              </text>
+            </g>
+          );
+        })}
       </svg>
       <div className="curve-contracts">
         {prices.map((p) => (

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowDownLeft,
   ArrowUpRight,
@@ -141,10 +141,49 @@ export default function OptionsLab({
   const [legs, setLegs] = useState<Leg[]>(templateLegs("put-spread"));
   const [futureQuantity, setFutureQuantity] = useState(1);
   const [rotation, setRotation] = useState(34);
+  const [pitch, setPitch] = useState(32);
   const [zoom, setZoom] = useState(100);
   const [surfaceExpiry, setSurfaceExpiry] = useState("all");
   const [pointId, setPointId] = useState("0-3");
+  const [hoveredPointId, setHoveredPointId] = useState<string | null>(null);
+  const [isAutoRotating, setIsAutoRotating] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
+  const dragRef = useRef<{
+    startX: number;
+    startY: number;
+    startRotation: number;
+    startPitch: number;
+    lastX: number;
+    lastY: number;
+    lastTime: number;
+    vx: number;
+    vy: number;
+  } | null>(null);
+  const inertiaAnimRef = useRef<number | null>(null);
+  const svgRef = useRef<SVGSVGElement>(null);
   const expiry = EXPIRIES.find((item) => item.id === expiryId)!;
+
+  useEffect(() => {
+    if (!isAutoRotating || isDragging) return;
+    let animId: number;
+    const tick = () => {
+      setRotation((prev) => {
+        const next = prev + 0.35;
+        return next > 70 ? -60 : Math.round(next * 10) / 10;
+      });
+      animId = requestAnimationFrame(tick);
+    };
+    animId = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(animId);
+  }, [isAutoRotating, isDragging]);
+
+  useEffect(() => {
+    return () => {
+      if (inertiaAnimRef.current) {
+        cancelAnimationFrame(inertiaAnimRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     setExpiryId(EXPIRIES[instrument === "brent-feb27" ? 1 : 0].id);
@@ -238,18 +277,54 @@ export default function OptionsLab({
     visiblePoints[0];
   const scale = zoom / 100;
   function project(strike: number, days: number, iv: number) {
-    const x = (strike - 83) * 24;
-    const y = (days - 51) * 5;
-    const z = (iv - 24) * 14;
-    const angle = (rotation * Math.PI) / 180;
+    const x = (strike - 83) * 23;
+    const y = (days - 51) * 5.4;
+    const z = (iv - 25.5) * 15;
+    const radYaw = (rotation * Math.PI) / 180;
+    const radPitch = (pitch * Math.PI) / 180;
+    const rx = x * Math.cos(radYaw) - y * Math.sin(radYaw);
+    const ry = x * Math.sin(radYaw) + y * Math.cos(radYaw);
     return {
-      x: 390 + (x * Math.cos(angle) - y * Math.sin(angle)) * scale,
-      y:
-        246 +
-        (x * Math.sin(angle) + y * Math.cos(angle)) * 0.43 * scale -
-        z * scale,
+      x: 390 + rx * scale,
+      y: 242 + (ry * Math.sin(radPitch) - z * Math.cos(radPitch)) * scale,
+      depth: ry * Math.cos(radPitch) + z * Math.sin(radPitch),
     };
   }
+
+  const meshData = useMemo(() => {
+    const daySteps = [37, 44, 51, 58, 65];
+    const grid = daySteps.map((d) => {
+      const t = (d - 37) / (65 - 37);
+      return STRIKES.map((strike) => {
+        const iv0 = quoteFor(EXPIRIES[0], strike, "call").iv;
+        const iv1 = quoteFor(EXPIRIES[1], strike, "call").iv;
+        return {
+          strike,
+          days: d,
+          iv: iv0 + (iv1 - iv0) * t,
+        };
+      });
+    });
+    const quads: {
+      id: string;
+      corners: { strike: number; days: number; iv: number }[];
+      avgIv: number;
+    }[] = [];
+    for (let r = 0; r < grid.length - 1; r++) {
+      for (let c = 0; c < grid[r].length - 1; c++) {
+        const p0 = grid[r][c];
+        const p1 = grid[r][c + 1];
+        const p2 = grid[r + 1][c + 1];
+        const p3 = grid[r + 1][c];
+        quads.push({
+          id: `quad-${r}-${c}`,
+          corners: [p0, p1, p2, p3],
+          avgIv: (p0.iv + p1.iv + p2.iv + p3.iv) / 4,
+        });
+      }
+    }
+    return { grid, quads };
+  }, []);
   function makeRule(type: OptionType, strike: number) {
     const quote = quoteFor(expiry, strike, type);
     const value = quote[priceField];
@@ -607,10 +682,219 @@ export default function OptionsLab({
             </div>
             <div className="surface-layout">
               <div className="surface-plot">
+                <div className="surface-hud-toolbar">
+                  <div className="surface-hud-left">
+                    <span className="surface-hud-pill">
+                      <span className="surface-hud-dot" />
+                      3D Interactive Surface
+                    </span>
+                    <span className="surface-hud-hint">
+                      ✦ Drag cursor to rotate 3D • Scroll to zoom • Double-click
+                      to reset
+                    </span>
+                  </div>
+                  <div className="surface-hud-presets">
+                    <button
+                      type="button"
+                      className={`surface-preset-btn ${rotation === 34 && pitch === 32 ? "active" : ""}`}
+                      onClick={() => {
+                        setRotation(34);
+                        setPitch(32);
+                        setZoom(100);
+                        setIsAutoRotating(false);
+                      }}
+                      title="3D Isometric perspective view"
+                    >
+                      3D Orbit
+                    </button>
+                    <button
+                      type="button"
+                      className={`surface-preset-btn ${rotation === 0 && pitch === 16 ? "active" : ""}`}
+                      onClick={() => {
+                        setRotation(0);
+                        setPitch(16);
+                        setZoom(105);
+                        setIsAutoRotating(false);
+                      }}
+                      title="Volatility Skew: Front view along expiry"
+                    >
+                      Smile / Skew
+                    </button>
+                    <button
+                      type="button"
+                      className={`surface-preset-btn ${rotation === 70 && pitch === 18 ? "active" : ""}`}
+                      onClick={() => {
+                        setRotation(70);
+                        setPitch(18);
+                        setZoom(105);
+                        setIsAutoRotating(false);
+                      }}
+                      title="Term Structure: Side view along strikes"
+                    >
+                      Term Structure
+                    </button>
+                    <button
+                      type="button"
+                      className={`surface-preset-btn ${rotation === 0 && pitch === 72 ? "active" : ""}`}
+                      onClick={() => {
+                        setRotation(0);
+                        setPitch(72);
+                        setZoom(100);
+                        setIsAutoRotating(false);
+                      }}
+                      title="Contour Map: Top-down bird's-eye view"
+                    >
+                      Top View
+                    </button>
+                    <button
+                      type="button"
+                      className={`surface-preset-btn orbit-toggle ${isAutoRotating ? "active" : ""}`}
+                      onClick={() => setIsAutoRotating((prev) => !prev)}
+                      title={
+                        isAutoRotating
+                          ? "Pause auto-orbit"
+                          : "Start continuous auto-orbit"
+                      }
+                      aria-label="Toggle auto-orbit"
+                    >
+                      {isAutoRotating ? "⏸ Pause" : "▶ Auto Orbit"}
+                    </button>
+                  </div>
+                </div>
+
                 <svg
-                  viewBox="0 0 780 360"
+                  ref={svgRef}
+                  viewBox="0 0 780 370"
                   role="img"
                   aria-labelledby="iv-title iv-description"
+                  style={{
+                    cursor: isDragging ? "grabbing" : "grab",
+                    userSelect: "none",
+                    touchAction: "none",
+                  }}
+                  onPointerDown={(e) => {
+                    if (e.button !== 0) return;
+                    setIsAutoRotating(false);
+                    setIsDragging(true);
+                    if (inertiaAnimRef.current) {
+                      cancelAnimationFrame(inertiaAnimRef.current);
+                      inertiaAnimRef.current = null;
+                    }
+                    dragRef.current = {
+                      startX: e.clientX,
+                      startY: e.clientY,
+                      startRotation: rotation,
+                      startPitch: pitch,
+                      lastX: e.clientX,
+                      lastY: e.clientY,
+                      lastTime: performance.now(),
+                      vx: 0,
+                      vy: 0,
+                    };
+                    (e.target as Element).setPointerCapture?.(e.pointerId);
+                  }}
+                  onPointerMove={(e) => {
+                    const now = performance.now();
+                    if (dragRef.current && isDragging) {
+                      const dx = e.clientX - dragRef.current.startX;
+                      const dy = e.clientY - dragRef.current.startY;
+                      const dt = Math.max(1, now - dragRef.current.lastTime);
+                      const vx = (e.clientX - dragRef.current.lastX) / dt;
+                      const vy = (e.clientY - dragRef.current.lastY) / dt;
+                      dragRef.current.lastX = e.clientX;
+                      dragRef.current.lastY = e.clientY;
+                      dragRef.current.lastTime = now;
+                      dragRef.current.vx = vx;
+                      dragRef.current.vy = vy;
+
+                      const nextRot = Math.max(
+                        -60,
+                        Math.min(70, dragRef.current.startRotation + dx * 0.35),
+                      );
+                      const nextPitch = Math.max(
+                        12,
+                        Math.min(75, dragRef.current.startPitch - dy * 0.3),
+                      );
+                      setRotation(Math.round(nextRot));
+                      setPitch(Math.round(nextPitch));
+                    } else {
+                      const rect = svgRef.current?.getBoundingClientRect();
+                      if (rect) {
+                        const mouseSvgX =
+                          ((e.clientX - rect.left) / rect.width) * 780;
+                        const mouseSvgY =
+                          ((e.clientY - rect.top) / rect.height) * 370;
+                        let nearestDist = 55;
+                        let nearestId: string | null = null;
+                        for (const pt of visiblePoints) {
+                          const projected = project(
+                            pt.strike,
+                            pt.expiry.days,
+                            pt.iv,
+                          );
+                          const dist = Math.hypot(
+                            projected.x - mouseSvgX,
+                            projected.y - mouseSvgY,
+                          );
+                          if (dist < nearestDist) {
+                            nearestDist = dist;
+                            nearestId = pt.id;
+                          }
+                        }
+                        setHoveredPointId(nearestId);
+                      }
+                    }
+                  }}
+                  onPointerUp={(e) => {
+                    if (!isDragging) return;
+                    setIsDragging(false);
+                    try {
+                      (e.target as Element).releasePointerCapture?.(
+                        e.pointerId,
+                      );
+                    } catch {}
+                    if (dragRef.current) {
+                      let { vx, vy } = dragRef.current;
+                      dragRef.current = null;
+                      if (Math.abs(vx) > 0.12 || Math.abs(vy) > 0.12) {
+                        let curRot = rotation;
+                        let curPitch = pitch;
+                        const coast = () => {
+                          vx *= 0.92;
+                          vy *= 0.92;
+                          curRot = Math.max(
+                            -60,
+                            Math.min(70, curRot + vx * 2.2),
+                          );
+                          curPitch = Math.max(
+                            12,
+                            Math.min(75, curPitch - vy * 1.8),
+                          );
+                          setRotation(Math.round(curRot));
+                          setPitch(Math.round(curPitch));
+                          if (Math.abs(vx) > 0.04 || Math.abs(vy) > 0.04) {
+                            inertiaAnimRef.current =
+                              requestAnimationFrame(coast);
+                          } else {
+                            inertiaAnimRef.current = null;
+                          }
+                        };
+                        inertiaAnimRef.current = requestAnimationFrame(coast);
+                      }
+                    }
+                  }}
+                  onWheel={(e) => {
+                    e.preventDefault();
+                    setZoom((z) =>
+                      Math.max(80, Math.min(125, z - Math.sign(e.deltaY) * 4)),
+                    );
+                  }}
+                  onDoubleClick={() => {
+                    setRotation(34);
+                    setPitch(32);
+                    setZoom(100);
+                    setIsAutoRotating(false);
+                  }}
                 >
                   <title id="iv-title">
                     Projected three-dimensional synthetic IV surface
@@ -621,57 +905,95 @@ export default function OptionsLab({
                     inspect its IV, strike and underlying reference. The data
                     table provides all values.
                   </desc>
-                  <g className="surface-floor">
-                    {[76, 78, 80, 82, 84, 86, 88, 90].map((strike) => {
-                      const a = project(strike, 33, 24);
-                      const b = project(strike, 69, 24);
+
+                  {/* 3D Floor Grid */}
+                  <g className="surface-floor" opacity="0.6">
+                    {STRIKES.map((strike) => {
+                      const a = project(strike, 37, 23.5);
+                      const b = project(strike, 65, 23.5);
                       return (
                         <line
-                          key={strike}
+                          key={`floor-s-${strike}`}
                           x1={a.x}
                           y1={a.y}
                           x2={b.x}
                           y2={b.y}
+                          stroke="var(--border)"
+                          strokeDasharray="2 3"
                         />
                       );
                     })}
                     {[37, 44, 51, 58, 65].map((days) => {
-                      const a = project(75, days, 24);
-                      const b = project(91, days, 24);
+                      const a = project(76, days, 23.5);
+                      const b = project(90, days, 23.5);
                       return (
-                        <line key={days} x1={a.x} y1={a.y} x2={b.x} y2={b.y} />
-                      );
-                    })}
-                  </g>
-                  {surfaceExpiry === "all" &&
-                    STRIKES.slice(0, -1).map((strike, index) => {
-                      const corners = [
-                        surfacePoints[index],
-                        surfacePoints[index + 1],
-                        surfacePoints[index + 9],
-                        surfacePoints[index + 8],
-                      ];
-                      const average =
-                        corners.reduce((sum, point) => sum + point.iv, 0) / 4;
-                      return (
-                        <polygon
-                          key={strike}
-                          points={corners
-                            .map((point) => {
-                              const projected = project(
-                                point.strike,
-                                point.expiry.days,
-                                point.iv,
-                              );
-                              return `${projected.x},${projected.y}`;
-                            })
-                            .join(" ")}
-                          fill={`hsl(${250 - (average - 26) * 19} 48% 64% / .42)`}
-                          stroke="var(--primary)"
-                          strokeWidth="0.8"
+                        <line
+                          key={`floor-d-${days}`}
+                          x1={a.x}
+                          y1={a.y}
+                          x2={b.x}
+                          y2={b.y}
+                          stroke="var(--border)"
+                          strokeDasharray="2 3"
                         />
                       );
                     })}
+                    {STRIKES.filter((_, i) => i % 2 === 0).map((strike) => {
+                      const pt = project(strike, 37, 23.5);
+                      return (
+                        <text
+                          key={`lbl-${strike}`}
+                          x={pt.x}
+                          y={pt.y + 11}
+                          className="surface-floor-tick"
+                          textAnchor="middle"
+                        >
+                          ${strike}
+                        </text>
+                      );
+                    })}
+                  </g>
+
+                  {/* Shaded 3D Surface Mesh */}
+                  {surfaceExpiry === "all" &&
+                    meshData.quads.map((quad) => {
+                      const pts = quad.corners.map((c) =>
+                        project(c.strike, c.days, c.iv),
+                      );
+                      const isHovered =
+                        hoveredPointId &&
+                        quad.corners.some((c) =>
+                          visiblePoints.find(
+                            (p) =>
+                              p.id === hoveredPointId &&
+                              p.strike === c.strike &&
+                              p.expiry.days === c.days,
+                          ),
+                        );
+                      const hue = Math.max(
+                        220,
+                        Math.min(295, 260 - (quad.avgIv - 26) * 16),
+                      );
+                      const lightness = isHovered ? 68 : 58;
+                      const opacity = isHovered ? 0.62 : 0.44;
+                      return (
+                        <polygon
+                          key={quad.id}
+                          points={pts
+                            .map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`)
+                            .join(" ")}
+                          fill={`hsl(${hue} 52% ${lightness}% / ${opacity})`}
+                          stroke="var(--primary)"
+                          strokeWidth={isHovered ? "1.3" : "0.75"}
+                          strokeOpacity={isHovered ? 0.95 : 0.65}
+                          style={{
+                            transition: "fill 0.15s ease, stroke 0.15s ease",
+                          }}
+                        />
+                      );
+                    })}
+
+                  {/* Primary Expiry Splines */}
                   {EXPIRIES.filter(
                     (item) =>
                       surfaceExpiry === "all" || item.id === surfaceExpiry,
@@ -684,75 +1006,157 @@ export default function OptionsLab({
                           item.days,
                           quoteFor(item, strike, "call").iv,
                         );
-                        return `${point.x},${point.y}`;
+                        return `${point.x.toFixed(1)},${point.y.toFixed(1)}`;
                       }).join(" ")}
                       fill="none"
                       stroke="var(--primary)"
-                      strokeWidth="1.7"
+                      strokeWidth="2"
                     />
                   ))}
+
+                  {/* Projection Drop Line & Floor Shadow for Active Point */}
+                  {(() => {
+                    const activePt =
+                      visiblePoints.find(
+                        (p) => p.id === (hoveredPointId || pointId),
+                      ) || inspectedPoint;
+                    const surf = project(
+                      activePt.strike,
+                      activePt.expiry.days,
+                      activePt.iv,
+                    );
+                    const floor = project(
+                      activePt.strike,
+                      activePt.expiry.days,
+                      23.5,
+                    );
+                    return (
+                      <g
+                        className="surface-projection-group"
+                        pointerEvents="none"
+                      >
+                        <line
+                          x1={floor.x}
+                          y1={floor.y}
+                          x2={surf.x}
+                          y2={surf.y}
+                          stroke="var(--primary)"
+                          strokeWidth="1.2"
+                          strokeDasharray="3 3"
+                          opacity="0.75"
+                        />
+                        <ellipse
+                          cx={floor.x}
+                          cy={floor.y}
+                          rx="7"
+                          ry="3.5"
+                          fill="var(--primary)"
+                          opacity="0.35"
+                        />
+                      </g>
+                    );
+                  })()}
+
+                  {/* Interactive Nodes */}
                   {visiblePoints.map((point) => {
                     const projected = project(
                       point.strike,
                       point.expiry.days,
                       point.iv,
                     );
+                    const isSelected = inspectedPoint.id === point.id;
+                    const isHovered = hoveredPointId === point.id;
                     return (
-                      <circle
-                        key={point.id}
-                        cx={projected.x}
-                        cy={projected.y}
-                        r={inspectedPoint.id === point.id ? 6 : 3.7}
-                        fill={
-                          inspectedPoint.id === point.id
-                            ? "var(--ink)"
-                            : "var(--primary)"
-                        }
-                        stroke="var(--surface)"
-                        strokeWidth="1.5"
-                        onMouseEnter={() => setPointId(point.id)}
-                      >
-                        <title>
-                          {point.strike} strike, {point.expiry.label},{" "}
-                          {point.iv.toFixed(2)}% IV
-                        </title>
-                      </circle>
+                      <g key={point.id} className="surface-node-group">
+                        {isSelected && (
+                          <circle
+                            cx={projected.x}
+                            cy={projected.y}
+                            r={9}
+                            fill="none"
+                            stroke="var(--primary)"
+                            strokeWidth="1.5"
+                            opacity="0.6"
+                          />
+                        )}
+                        <circle
+                          cx={projected.x}
+                          cy={projected.y}
+                          r={isSelected ? 6.5 : isHovered ? 5.5 : 3.8}
+                          fill={
+                            isSelected
+                              ? "var(--ink)"
+                              : isHovered
+                                ? "var(--primary-light)"
+                                : "var(--primary)"
+                          }
+                          stroke="#ffffff"
+                          strokeWidth={isSelected ? 2 : 1.4}
+                          style={{ cursor: "pointer" }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setPointId(point.id);
+                          }}
+                          onMouseEnter={() => {
+                            setPointId(point.id);
+                            setHoveredPointId(point.id);
+                          }}
+                          onMouseLeave={() => setHoveredPointId(null)}
+                        >
+                          <title>
+                            {point.strike} strike, {point.expiry.label},{" "}
+                            {point.iv.toFixed(2)}% IV
+                          </title>
+                        </circle>
+                      </g>
                     );
                   })}
+
+                  {/* Point Label / Inspector Tooltip */}
                   {(() => {
+                    const activePt =
+                      visiblePoints.find(
+                        (p) => p.id === (hoveredPointId || pointId),
+                      ) || inspectedPoint;
                     const point = project(
-                      inspectedPoint.strike,
-                      inspectedPoint.expiry.days,
-                      inspectedPoint.iv,
+                      activePt.strike,
+                      activePt.expiry.days,
+                      activePt.iv,
                     );
-                    const x = Math.min(650, Math.max(12, point.x + 12));
-                    const y = Math.max(20, point.y - 39);
+                    const x = Math.min(640, Math.max(16, point.x + 12));
+                    const y = Math.max(22, point.y - 36);
                     return (
-                      <g className="surface-point-label" aria-hidden="true">
-                        <rect x={x} y={y} width="112" height="29" rx="5" />
+                      <g
+                        className="surface-point-label"
+                        aria-hidden="true"
+                        pointerEvents="none"
+                      >
+                        <rect x={x} y={y} width="124" height="30" rx="6" />
                         <text x={x + 10} y={y + 19}>
-                          {inspectedPoint.strike} ·{" "}
-                          {inspectedPoint.iv.toFixed(2)}% IV
+                          {activePt.strike} · {activePt.iv.toFixed(2)}% IV
                         </text>
                       </g>
                     );
                   })()}
+
                   <text x="28" y="39" className="surface-axis-title">
                     IMPLIED VOLATILITY (%)
                   </text>
                   <text x="24" y="61" className="surface-axis-note">
                     Synthetic inputs · no pricing model
                   </text>
-                  <text x="465" y="338" className="surface-axis-title">
+                  <text x="465" y="348" className="surface-axis-title">
                     STRIKE (USD/bbl)
                   </text>
-                  <text x="52" y="305" className="surface-axis-title">
+                  <text x="52" y="318" className="surface-axis-title">
                     TIME TO EXPIRY (days)
                   </text>
                 </svg>
+
                 <div className="surface-controls">
                   <label>
                     Rotation <strong>{rotation}°</strong>
+                    <span className="surface-drag-hint">↔ drag left/right</span>
                     <input
                       aria-label="Surface rotation"
                       type="range"
@@ -765,7 +1169,20 @@ export default function OptionsLab({
                     />
                   </label>
                   <label>
+                    Pitch <strong>{pitch}°</strong>
+                    <span className="surface-drag-hint">↕ drag up/down</span>
+                    <input
+                      aria-label="Surface pitch"
+                      type="range"
+                      min="12"
+                      max="75"
+                      value={pitch}
+                      onChange={(event) => setPitch(Number(event.target.value))}
+                    />
+                  </label>
+                  <label>
                     Zoom <strong>{zoom}%</strong>
+                    <span className="surface-drag-hint">scroll wheel</span>
                     <input
                       aria-label="Surface zoom"
                       type="range"
@@ -780,7 +1197,9 @@ export default function OptionsLab({
                     className="btn btn-ghost"
                     onClick={() => {
                       setRotation(34);
+                      setPitch(32);
                       setZoom(100);
+                      setIsAutoRotating(false);
                     }}
                   >
                     <RotateCcw size={14} /> Reset view
