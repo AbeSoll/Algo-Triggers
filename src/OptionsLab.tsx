@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowDownLeft,
   ArrowUpRight,
@@ -10,6 +10,12 @@ import {
   Trash2,
 } from "lucide-react";
 import type { Rule } from "./types";
+import {
+  fetchLiveOptions,
+  type LiveOptionsData,
+  type LiveQuote,
+  type LiveExpiry,
+} from "./api";
 import "./options.css";
 
 type OptionType = "call" | "put";
@@ -126,6 +132,10 @@ export default function OptionsLab({
   instrument: string;
   onCreateRule: (partial: Partial<Rule>) => void;
 }) {
+  const [underlyingSymbol, setUnderlyingSymbol] = useState<"BNO" | "USO">("BNO");
+  const [liveOptions, setLiveOptions] = useState<LiveOptionsData | null>(null);
+  const [isOptionsLoading, setIsOptionsLoading] = useState(false);
+
   const [expiryId, setExpiryId] = useState(
     EXPIRIES[instrument === "brent-feb27" ? 1 : 0].id,
   );
@@ -161,7 +171,92 @@ export default function OptionsLab({
   } | null>(null);
   const inertiaAnimRef = useRef<number | null>(null);
   const svgRef = useRef<SVGSVGElement>(null);
-  const expiry = EXPIRIES.find((item) => item.id === expiryId)!;
+
+  // Fetch live options chain on mount or underlying change
+  useEffect(() => {
+    let mounted = true;
+    setIsOptionsLoading(true);
+    fetchLiveOptions(underlyingSymbol).then((data) => {
+      if (mounted && data) {
+        setLiveOptions(data);
+        if (data.expiries.length > 0) {
+          setExpiryId(data.expiries[0].id);
+        }
+        if (data.strikes.length > 0) {
+          const atm = data.strikes.reduce((prev, curr) =>
+            Math.abs(curr - data.underlyingPrice) < Math.abs(prev - data.underlyingPrice) ? curr : prev,
+          );
+          setSelected({ strike: atm, type: "call" });
+          const atmIdx = data.strikes.indexOf(atm);
+          const lowerStrike = data.strikes[Math.max(0, atmIdx - 2)] ?? (atm - 2);
+          setLegs([
+            { id: 1, type: "put", strike: atm, quantity: 1 },
+            { id: 2, type: "put", strike: lowerStrike, quantity: -1 },
+          ]);
+        }
+      }
+      if (mounted) setIsOptionsLoading(false);
+    });
+    return () => {
+      mounted = false;
+    };
+  }, [underlyingSymbol]);
+
+  const expiries: Expiry[] = useMemo(() => {
+    if (liveOptions && liveOptions.expiries.length > 0) {
+      return liveOptions.expiries.map((e) => ({
+        id: e.id,
+        label: e.label,
+        underlying: e.underlying,
+        reference: e.reference,
+        future: e.future,
+        days: e.days,
+      }));
+    }
+    return EXPIRIES;
+  }, [liveOptions]);
+
+  const strikes: number[] = useMemo(() => {
+    if (liveOptions && liveOptions.strikes.length > 0) {
+      return liveOptions.strikes;
+    }
+    return STRIKES;
+  }, [liveOptions]);
+
+  const quoteMap = useMemo(() => {
+    const map = new Map<string, Quote>();
+    if (liveOptions && liveOptions.quotes.length > 0) {
+      for (const q of liveOptions.quotes) {
+        map.set(`${q.strike}_${q.type}`, {
+          type: q.type,
+          strike: q.strike,
+          bid: q.bid,
+          ask: q.ask,
+          last: q.last,
+          mark: q.mark,
+          iv: q.iv,
+          delta: q.delta,
+          gamma: q.gamma,
+          theta: q.theta,
+          vega: q.vega,
+          volume: q.volume,
+          oi: q.oi,
+        });
+      }
+    }
+    return map;
+  }, [liveOptions]);
+
+  const getQuote = useCallback(
+    (exp: Expiry, strike: number, type: OptionType): Quote => {
+      const live = quoteMap.get(`${strike}_${type}`);
+      if (live) return live;
+      return quoteFor(exp, strike, type);
+    },
+    [quoteMap],
+  );
+
+  const expiry = expiries.find((item) => item.id === expiryId) ?? expiries[0] ?? EXPIRIES[0];
 
   useEffect(() => {
     if (!isAutoRotating || isDragging) return;
@@ -186,19 +281,19 @@ export default function OptionsLab({
   }, []);
 
   useEffect(() => {
-    setExpiryId(EXPIRIES[instrument === "brent-feb27" ? 1 : 0].id);
-    setSelected({ strike: 84, type: "call" });
-  }, [instrument]);
+    setExpiryId(expiries[instrument === "brent-feb27" ? 1 : 0]?.id ?? expiries[0]?.id);
+    setSelected({ strike: strikes[0] || 84, type: "call" });
+  }, [instrument, expiries, strikes]);
 
-  const selectedQuote = quoteFor(expiry, selected.strike, selected.type);
-  const shownStrikes = STRIKES.filter(
-    (strike) => strikeFilter === "all" || Math.abs(strike - expiry.future) <= 4,
+  const selectedQuote = getQuote(expiry, selected.strike, selected.type);
+  const shownStrikes = strikes.filter(
+    (strike) => strikeFilter === "all" || Math.abs(strike - expiry.future) <= Math.max(4, expiry.future * 0.15),
   );
   const showCalls = typeFilter !== "put";
   const showPuts = typeFilter !== "call";
   const legValues = legs.map((leg) => ({
     ...leg,
-    quote: quoteFor(expiry, leg.strike, leg.type),
+    quote: getQuote(expiry, leg.strike, leg.type),
   }));
   let strategyError = "";
   if (
@@ -256,17 +351,26 @@ export default function OptionsLab({
     },
   );
 
+  const surfaceStrikes = useMemo(() => {
+    if (strikes.length <= 10) return strikes;
+    const refPrice = liveOptions?.underlyingPrice || expiry.future || 67.5;
+    const sorted = [...strikes].sort(
+      (a, b) => Math.abs(a - refPrice) - Math.abs(b - refPrice),
+    );
+    return sorted.slice(0, 9).sort((a, b) => a - b);
+  }, [strikes, liveOptions, expiry.future]);
+
   const surfacePoints = useMemo(
     () =>
-      EXPIRIES.flatMap((item, expiryIndex) =>
-        STRIKES.map((strike, strikeIndex) => ({
+      expiries.slice(0, 4).flatMap((item, expiryIndex) =>
+        surfaceStrikes.map((strike, strikeIndex) => ({
           id: `${expiryIndex}-${strikeIndex}`,
           expiry: item,
           strike,
-          iv: quoteFor(item, strike, "call").iv,
+          iv: getQuote(item, strike, "call").iv,
         })),
       ),
-    [],
+    [expiries, surfaceStrikes, getQuote],
   );
   const visiblePoints = surfacePoints.filter(
     (point) => surfaceExpiry === "all" || point.expiry.id === surfaceExpiry,
@@ -276,32 +380,46 @@ export default function OptionsLab({
     visiblePoints[3] ??
     visiblePoints[0];
   const scale = zoom / 100;
+
+  const minStrike = surfaceStrikes[0] ?? 76;
+  const maxStrike = surfaceStrikes[surfaceStrikes.length - 1] ?? 90;
+  const midStrike = (minStrike + maxStrike) / 2;
+  const strikeSpan = Math.max(6, maxStrike - minStrike);
+
+  const minDays = expiries[0]?.days ?? 37;
+  const maxDays = expiries[expiries.length - 1]?.days ?? 65;
+  const midDays = (minDays + maxDays) / 2;
+  const daysSpan = Math.max(14, maxDays - minDays);
+
   function project(strike: number, days: number, iv: number) {
-    const x = (strike - 83) * 23;
-    const y = (days - 51) * 5.4;
-    const z = (iv - 25.5) * 15;
+    const x = ((strike - midStrike) / strikeSpan) * 260;
+    const y = ((days - midDays) / daysSpan) * 140;
+    const z = ((Math.min(90, Math.max(15, iv)) - 30) / 40) * 90;
     const radYaw = (rotation * Math.PI) / 180;
     const radPitch = (pitch * Math.PI) / 180;
     const rx = x * Math.cos(radYaw) - y * Math.sin(radYaw);
     const ry = x * Math.sin(radYaw) + y * Math.cos(radYaw);
     return {
       x: 390 + rx * scale,
-      y: 242 + (ry * Math.sin(radPitch) - z * Math.cos(radPitch)) * scale,
+      y: 230 + (ry * Math.sin(radPitch) - z * Math.cos(radPitch)) * scale,
       depth: ry * Math.cos(radPitch) + z * Math.sin(radPitch),
     };
   }
 
   const meshData = useMemo(() => {
-    const daySteps = [37, 44, 51, 58, 65];
+    const activeExpiries = expiries.slice(0, 3);
+    const d0 = activeExpiries[0]?.days ?? 37;
+    const d1 = activeExpiries[activeExpiries.length - 1]?.days ?? 65;
+    const daySteps = [d0, d0 + (d1 - d0) * 0.25, d0 + (d1 - d0) * 0.5, d0 + (d1 - d0) * 0.75, d1];
     const grid = daySteps.map((d) => {
-      const t = (d - 37) / (65 - 37);
-      return STRIKES.map((strike) => {
-        const iv0 = quoteFor(EXPIRIES[0], strike, "call").iv;
-        const iv1 = quoteFor(EXPIRIES[1], strike, "call").iv;
+      const t = d1 === d0 ? 0 : (d - d0) / (d1 - d0);
+      return surfaceStrikes.map((strike) => {
+        const iv0 = getQuote(activeExpiries[0] || expiries[0], strike, "call").iv;
+        const iv1 = getQuote(activeExpiries[activeExpiries.length - 1] || expiries[0], strike, "call").iv;
         return {
           strike,
           days: d,
-          iv: iv0 + (iv1 - iv0) * t,
+          iv: Number((iv0 + (iv1 - iv0) * t).toFixed(1)),
         };
       });
     });
@@ -324,9 +442,9 @@ export default function OptionsLab({
       }
     }
     return { grid, quads };
-  }, []);
+  }, [expiries, surfaceStrikes, getQuote]);
   function makeRule(type: OptionType, strike: number) {
-    const quote = quoteFor(expiry, strike, type);
+    const quote = getQuote(expiry, strike, type);
     const value = quote[priceField];
     if (value === null) return;
     onCreateRule({
@@ -363,7 +481,7 @@ export default function OptionsLab({
     setFutureQuantity(1);
   }
   function renderQuoteCells(type: OptionType, strike: number) {
-    const quote = quoteFor(expiry, strike, type);
+    const quote = getQuote(expiry, strike, type);
     const action = (
       <button
         className="option-rule-button"
@@ -443,15 +561,25 @@ export default function OptionsLab({
         </div>
         <div className="options-toolbar">
           <label>
+            Oil underlying
+            <select
+              value={underlyingSymbol}
+              onChange={(e) => setUnderlyingSymbol(e.target.value as "BNO" | "USO")}
+            >
+              <option value="BNO">BNO · Brent Crude Oil Fund (Live)</option>
+              <option value="USO">USO · WTI Crude Oil Fund (Live)</option>
+            </select>
+          </label>
+          <label>
             Option expiry
             <select
               value={expiryId}
               onChange={(event) => {
                 setExpiryId(event.target.value);
-                setSelected({ strike: 84, type: "call" });
+                setSelected({ strike: strikes[0] || 84, type: "call" });
               }}
             >
-              {EXPIRIES.map((item) => (
+              {expiries.map((item) => (
                 <option key={item.id} value={item.id}>
                   {item.label} · {item.days} days
                 </option>
@@ -459,16 +587,30 @@ export default function OptionsLab({
             </select>
           </label>
           <div className="options-reference">
-            <span>Underlying futures reference</span>
+            <span>Underlying market reference</span>
             <strong>
-              {expiry.reference}{" "}
-              <span className="opt-number">{expiry.future.toFixed(2)}</span>
+              {liveOptions ? liveOptions.underlying : expiry.reference}{" "}
+              <span className="opt-number">
+                ${(liveOptions ? liveOptions.underlyingPrice : expiry.future).toFixed(2)}
+              </span>
             </strong>
-            <small>USD/bbl · illustrative contract mapping</small>
+            <small>USD · Live Yahoo Finance</small>
           </div>
           <div className="options-snapshot">
-            <span className="badge badge-purple">Synthetic snapshot</span>
-            <span>{SNAPSHOT}</span>
+            <span
+              className="badge"
+              style={{
+                background: "rgba(10,140,115,0.12)",
+                color: "#087d68",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
+              }}
+            >
+              <span className="dot green" />
+              {isOptionsLoading ? "Fetching..." : "Live Options Chain"}
+            </span>
+            <span>{liveOptions?.snapshot || SNAPSHOT}</span>
           </div>
         </div>
 
@@ -671,8 +813,8 @@ export default function OptionsLab({
                   value={surfaceExpiry}
                   onChange={(event) => setSurfaceExpiry(event.target.value)}
                 >
-                  <option value="all">Both synthetic expiries</option>
-                  {EXPIRIES.map((item) => (
+                  <option value="all">Both selected expiries</option>
+                  {expiries.map((item) => (
                     <option value={item.id} key={item.id}>
                       {item.label}
                     </option>
@@ -908,9 +1050,9 @@ export default function OptionsLab({
 
                   {/* 3D Floor Grid */}
                   <g className="surface-floor" opacity="0.6">
-                    {STRIKES.map((strike) => {
-                      const a = project(strike, 37, 23.5);
-                      const b = project(strike, 65, 23.5);
+                    {surfaceStrikes.map((strike) => {
+                      const a = project(strike, minDays, 23.5);
+                      const b = project(strike, maxDays, 23.5);
                       return (
                         <line
                           key={`floor-s-${strike}`}
@@ -923,9 +1065,9 @@ export default function OptionsLab({
                         />
                       );
                     })}
-                    {[37, 44, 51, 58, 65].map((days) => {
-                      const a = project(76, days, 23.5);
-                      const b = project(90, days, 23.5);
+                    {[minDays, Math.round(minDays + (maxDays - minDays) * 0.5), maxDays].map((days) => {
+                      const a = project(minStrike, days, 23.5);
+                      const b = project(maxStrike, days, 23.5);
                       return (
                         <line
                           key={`floor-d-${days}`}
@@ -938,8 +1080,8 @@ export default function OptionsLab({
                         />
                       );
                     })}
-                    {STRIKES.filter((_, i) => i % 2 === 0).map((strike) => {
-                      const pt = project(strike, 37, 23.5);
+                    {surfaceStrikes.filter((_, i) => i % 2 === 0).map((strike) => {
+                      const pt = project(strike, minDays, 23.5);
                       return (
                         <text
                           key={`lbl-${strike}`}
@@ -994,17 +1136,17 @@ export default function OptionsLab({
                     })}
 
                   {/* Primary Expiry Splines */}
-                  {EXPIRIES.filter(
+                  {expiries.filter(
                     (item) =>
                       surfaceExpiry === "all" || item.id === surfaceExpiry,
                   ).map((item) => (
                     <polyline
                       key={item.id}
-                      points={STRIKES.map((strike) => {
+                      points={surfaceStrikes.map((strike) => {
                         const point = project(
                           strike,
                           item.days,
-                          quoteFor(item, strike, "call").iv,
+                          getQuote(item, strike, "call").iv,
                         );
                         return `${point.x.toFixed(1)},${point.y.toFixed(1)}`;
                       }).join(" ")}
@@ -1251,7 +1393,7 @@ export default function OptionsLab({
                     <dd>
                       {inspectedPoint.strike} call · mark{" "}
                       {number(
-                        quoteFor(
+                        getQuote(
                           inspectedPoint.expiry,
                           inspectedPoint.strike,
                           "call",
@@ -1426,7 +1568,7 @@ export default function OptionsLab({
                       updateLeg(leg.id, { strike: Number(event.target.value) })
                     }
                   >
-                    {STRIKES.map((strike) => (
+                    {strikes.map((strike) => (
                       <option key={strike} value={strike}>
                         {strike.toFixed(2)}
                       </option>

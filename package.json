@@ -11,6 +11,7 @@
     "format:check": "prettier --check src tests index.html vite.config.ts playwright.config.ts scripts",
     "format": "prettier --write src tests index.html vite.config.ts playwright.config.ts scripts",
     "preview": "vite preview --host 127.0.0.1",
+    "server": "node server/index.mjs",
     "test:e2e": "playwright test",
     "check:tokens": "node scripts/check-tokens.mjs"
   },

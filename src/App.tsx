@@ -36,9 +36,17 @@ import {
   Sparkles,
   TrendingUp,
   X,
+  RefreshCw,
 } from "lucide-react";
-import type { Condition, Rule, TriggerEvent } from "./types";
+import type { Bar, Condition, Rule, TriggerEvent } from "./types";
 import { generateBars, instruments, seedRules } from "./fixtures";
+import {
+  fetchLiveInstruments,
+  fetchLiveBars,
+  fetchLiveCurve,
+  type LiveInstrument,
+  type LiveCurve,
+} from "./api";
 import { replay, summarize } from "./domain";
 import { evaluateDemoStep } from "./monitor";
 import PriceChart from "./PriceChart";
@@ -231,18 +239,89 @@ export default function App() {
   const [savedRun, setSavedRun] = useState<StoredRun | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const rules = useMemo(() => latest(store.rules), [store.rules]);
-  const bars = useMemo(
-    () => generateBars(instrument, timeframe),
-    [instrument, timeframe],
+
+  // Live Yahoo Finance data state
+  const [liveInstruments, setLiveInstruments] = useState<LiveInstrument[]>([]);
+  const [liveBars, setLiveBars] = useState<Bar[]>(() =>
+    generateBars(instrument, timeframe),
   );
+  const [isLiveLoading, setIsLiveLoading] = useState(false);
+  const [liveConnected, setLiveConnected] = useState(true);
+  const [lastLiveUpdate, setLastLiveUpdate] = useState<Date>(new Date());
+  const [liveCurveData, setLiveCurveData] = useState<LiveCurve | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+    const loadInst = async () => {
+      const list = await fetchLiveInstruments();
+      if (mounted && list.length > 0) {
+        setLiveInstruments(list);
+      }
+    };
+    loadInst();
+    const timer = setInterval(loadInst, 20000);
+    return () => {
+      mounted = false;
+      clearInterval(timer);
+    };
+  }, []);
+
+  const reloadLiveBars = useCallback(
+    async (showLoading = true) => {
+      if (showLoading) setIsLiveLoading(true);
+      try {
+        const data = await fetchLiveBars(instrument, timeframe, range);
+        if (data && data.length > 0) {
+          setLiveBars(data);
+          setLiveConnected(true);
+          setLastLiveUpdate(new Date());
+        }
+      } catch (err) {
+        console.warn("[Live Bars Error]:", err);
+        setLiveConnected(false);
+      } finally {
+        if (showLoading) setIsLiveLoading(false);
+      }
+    },
+    [instrument, timeframe, range],
+  );
+
+  useEffect(() => {
+    reloadLiveBars(true);
+    const timer = setInterval(() => {
+      reloadLiveBars(false);
+    }, 15000);
+    return () => clearInterval(timer);
+  }, [reloadLiveBars]);
+
+  useEffect(() => {
+    if (chartTab === "curve") {
+      fetchLiveCurve().then((c) => {
+        if (c) setLiveCurveData(c);
+      });
+    }
+  }, [chartTab]);
+
+  const bars = liveBars;
   const visibleBars = useMemo(
     () => (range === "1D" ? bars.slice(-Math.floor(bars.length / 5)) : bars),
     [bars, range],
   );
-  const last = bars.at(-1)!;
-  const first = bars[0];
+  const last = bars.at(-1) ?? {
+    time: Date.now(),
+    open: 109.3,
+    high: 109.3,
+    low: 109.3,
+    close: 109.3,
+    volume: 0,
+  };
+  const first = bars[0] ?? last;
   const change = last.close - first.close;
-  const instrumentLabel = instruments.find((i) => i.id === instrument)!.label;
+  const currentLiveMeta = liveInstruments.find((i) => i.id === instrument);
+  const instrumentLabel =
+    currentLiveMeta?.label ??
+    instruments.find((i) => i.id === instrument)?.label ??
+    instrument;
   const filteredRules = rules.filter(
     (r) =>
       (ruleFilter === "all" || r.status === ruleFilter) &&
@@ -711,12 +790,14 @@ export default function App() {
         </div>
         <div className="sidebar-bottom">
           <div className="demo-side">
-            <span className="demo-orbit">
-              <FlaskConical size={18} />
+            <span className="demo-orbit" style={{ background: "rgba(8,125,104,0.18)", color: "#087d68" }}>
+              <Activity size={18} />
             </span>
-            <strong>A safe place to test</strong>
-            <p>Explore ideas with synthetic data. No trades. No live feed.</p>
-            <span className="side-demo-badge">DEMO WORKSPACE</span>
+            <strong>Live Yahoo Finance Feed</strong>
+            <p>Connected to NYMEX/ICE live Brent & WTI quotes, curve and options chain.</p>
+            <span className="side-demo-badge" style={{ background: "rgba(8,125,104,0.22)", color: "#087d68" }}>
+              LIVE MARKET FEED
+            </span>
           </div>
           <button onClick={() => setHelp(true)} className="sidebar-help">
             <CircleHelp size={17} />
@@ -745,16 +826,26 @@ export default function App() {
             <strong>Brent crude</strong>
           </div>
           <div className="topbar-right">
-            <span className="demo-top">
-              <span className="dot amber" />
-              {health === "healthy"
-                ? "Synthetic data"
-                : health === "stale"
-                  ? "Stale demo data"
-                  : "Demo data unavailable"}
+            <span
+              className="demo-top"
+              style={{
+                color: liveConnected ? "#087d68" : "#c4962e",
+                background: liveConnected ? "rgba(8,125,104,0.1)" : "rgba(196,150,46,0.1)",
+                padding: "4px 9px",
+                borderRadius: "6px",
+                fontWeight: 600,
+              }}
+            >
+              <span className={`dot ${liveConnected ? "green" : "amber"}`} />
+              {liveConnected ? "Live Yahoo Finance (BZ=F)" : "Offline fallback"}
             </span>
             <span className="topbar-time">
-              {view === "options" ? "19" : "16"} Oct 2026 · UTC
+              {new Date().toLocaleDateString("en-GB", {
+                day: "2-digit",
+                month: "short",
+                year: "numeric",
+              })}{" "}
+              · Live
             </span>
             <button
               className="icon-button mobile-settings"
@@ -870,10 +961,12 @@ export default function App() {
                 <div className="quote-detail quote-health">
                   <span>Data source</span>
                   <strong>
-                    <span className="dot amber" />
-                    Synthetic fixture
+                    <span className={`dot ${liveConnected ? "green" : "amber"}`} />
+                    {liveConnected ? "Yahoo Finance Live" : "Cached fallback"}
                   </strong>
-                  <small>Snapshot · {timestamp(last.time)} UTC</small>
+                  <small>
+                    {currentLiveMeta?.symbol ?? "BZ=F"} · {timestamp(last.time)} UTC
+                  </small>
                 </div>
               </div>
               <div className="market-grid">
@@ -895,13 +988,23 @@ export default function App() {
                         Futures curve
                       </button>
                     </div>
-                    <button
-                      className="icon-button"
-                      onClick={exportCsv}
-                      aria-label="Export synthetic chart data"
-                    >
-                      <Download size={17} />
-                    </button>
+                    <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+                      <button
+                        className="icon-button"
+                        onClick={() => reloadLiveBars(true)}
+                        aria-label="Refresh live data"
+                        title="Refresh live data from Yahoo Finance"
+                      >
+                        <RefreshCw size={16} className={isLiveLoading ? "spinner" : ""} />
+                      </button>
+                      <button
+                        className="icon-button"
+                        onClick={exportCsv}
+                        aria-label="Export chart data"
+                      >
+                        <Download size={17} />
+                      </button>
+                    </div>
                   </div>
                   <div className="market-controls">
                     <label className="sr-only" htmlFor="instrument">
@@ -1011,6 +1114,7 @@ export default function App() {
                       far={curveFar}
                       setNear={setCurveNear}
                       setFar={setCurveFar}
+                      liveInstruments={liveInstruments}
                       onContract={(id) => {
                         setInstrument(id);
                         setChartTab("price");
@@ -1735,17 +1839,22 @@ function Curve({
   setNear,
   setFar,
   onContract,
+  liveInstruments,
 }: {
   near: string;
   far: string;
   setNear: (v: string) => void;
   setFar: (v: string) => void;
   onContract: (id: string) => void;
+  liveInstruments?: LiveInstrument[];
 }) {
-  const prices = instruments.map((i) => ({
-    ...i,
-    price: generateBars(i.id, "5m").at(-1)!.close,
-  }));
+  const prices = instruments.map((i) => {
+    const live = liveInstruments?.find((li) => li.id === i.id);
+    return {
+      ...i,
+      price: live ? live.price : generateBars(i.id, "5m").at(-1)!.close,
+    };
+  });
   const nearPrice = prices.find((p) => p.id === near)!.price,
     farPrice = prices.find((p) => p.id === far)!.price;
   const diff = nearPrice - farPrice;
