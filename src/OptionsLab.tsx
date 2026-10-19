@@ -7,6 +7,7 @@ import {
   Plus,
   RotateCcw,
   ScanLine,
+  Sliders,
   Trash2,
 } from "lucide-react";
 import type { Rule } from "./types";
@@ -143,6 +144,7 @@ export default function OptionsLab({
   const [priceField, setPriceField] = useState<PriceField>("mark");
   const [typeFilter, setTypeFilter] = useState<"all" | OptionType>("all");
   const [strikeFilter, setStrikeFilter] = useState("all");
+  const [showGreeks, setShowGreeks] = useState(false);
   const [selected, setSelected] = useState<{
     strike: number;
     type: OptionType;
@@ -515,12 +517,16 @@ export default function OptionsLab({
           {number(quote.mark)}
         </button>
       </td>,
-      <td key="iv" className="opt-number">
-        {number(quote.iv, 1)}%
-      </td>,
-      <td key="delta" className="opt-number muted">
-        {signed(quote.delta)}
-      </td>,
+      ...(showGreeks
+        ? [
+            <td key="iv" className="opt-number">
+              {number(quote.iv, 1)}%
+            </td>,
+            <td key="delta" className="opt-number muted">
+              {signed(quote.delta)}
+            </td>,
+          ]
+        : []),
     ];
     return type === "call"
       ? [<td key="action">{action}</td>, ...cells]
@@ -655,6 +661,16 @@ export default function OptionsLab({
                     <option value="near">Within $4 of reference</option>
                   </select>
                 </label>
+                <button
+                  type="button"
+                  className={`options-greeks-toggle ${showGreeks ? "active" : ""}`}
+                  onClick={() => setShowGreeks((prev) => !prev)}
+                  title="Toggle Greeks (Delta, IV) columns on the options ladder"
+                  aria-pressed={showGreeks}
+                >
+                  <Sliders size={13} />
+                  <span>{showGreeks ? "Hide Greeks (Δ, IV)" : "Show Greeks (Δ, IV)"}</span>
+                </button>
               </div>
               <span className="options-table-count">
                 {shownStrikes.length} strikes · USD/bbl
@@ -674,7 +690,7 @@ export default function OptionsLab({
                 <thead>
                   <tr className="option-side-heading">
                     {showCalls && (
-                      <th colSpan={6} scope="colgroup">
+                      <th colSpan={showGreeks ? 6 : 4} scope="colgroup">
                         <span className="calls-label">
                           <ArrowUpRight size={14} /> Calls
                         </span>
@@ -684,7 +700,7 @@ export default function OptionsLab({
                       Strike
                     </th>
                     {showPuts && (
-                      <th colSpan={6} scope="colgroup">
+                      <th colSpan={showGreeks ? 6 : 4} scope="colgroup">
                         <span className="puts-label">
                           Puts <ArrowDownLeft size={14} />
                         </span>
@@ -698,8 +714,12 @@ export default function OptionsLab({
                         <th scope="col">Bid</th>
                         <th scope="col">Ask</th>
                         <th scope="col">Mark</th>
-                        <th scope="col">IV</th>
-                        <th scope="col">Delta</th>
+                        {showGreeks && (
+                          <>
+                            <th scope="col">IV</th>
+                            <th scope="col">Delta</th>
+                          </>
+                        )}
                       </>
                     )}
                     <th className="strike-column" scope="col">
@@ -710,8 +730,12 @@ export default function OptionsLab({
                         <th scope="col">Bid</th>
                         <th scope="col">Ask</th>
                         <th scope="col">Mark</th>
-                        <th scope="col">IV</th>
-                        <th scope="col">Delta</th>
+                        {showGreeks && (
+                          <>
+                            <th scope="col">IV</th>
+                            <th scope="col">Delta</th>
+                          </>
+                        )}
                         <th scope="col">Draft rule</th>
                       </>
                     )}

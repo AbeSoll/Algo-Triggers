@@ -141,6 +141,34 @@
 .options-inline-fields label {
   min-width: 118px;
 }
+.options-greeks-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--muted);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  align-self: flex-end;
+}
+.options-greeks-toggle:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+  background: var(--primary-dim);
+}
+.options-greeks-toggle.active {
+  border-color: var(--primary);
+  background: var(--primary-dim);
+  color: var(--primary);
+  box-shadow: 0 0 0 1px var(--primary);
+}
 .options-table-count {
   padding-bottom: 9px;
   color: var(--muted);
