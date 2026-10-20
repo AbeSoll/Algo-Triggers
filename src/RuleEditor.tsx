@@ -95,17 +95,29 @@ export default function RuleEditor({
           ? "percent_change"
           : "price",
     );
+    const contract =
+      instruments.find((i) => i.id === draft.instrument)?.label ??
+      draft.instrument;
+
+    let autoName = draft.name;
     if (type === "drop") {
       next.operator = "crosses_below";
       next.threshold = 105;
+      autoName = `${contract} drops below $105.00`;
     } else if (type === "breakout") {
       next.threshold = 110;
+      autoName = `${contract} crosses above $110.00`;
     } else if (type === "percent") {
       next.operator = "above";
       next.threshold = 1.5;
+      autoName = `${contract} +1.5% momentum move`;
+    } else if (type === "ma_cross") {
+      autoName = `${contract} Fast SMA 9 crosses above Slow SMA 21`;
     }
+
     setDraft({
       ...draft,
+      name: autoName,
       conditions: [
         { ...next, id: draft.conditions[0].id },
         ...draft.conditions.slice(1),
