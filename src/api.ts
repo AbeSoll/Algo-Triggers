@@ -1,31 +1,42 @@
-// src/api.ts
-// Frontend client for Yahoo Finance live data API
+// Frontend client for observed Yahoo Finance snapshots; demo data is selected explicitly.
 import type { Bar } from "./types";
-import { generateBars } from "./fixtures";
 
+export type MarketMode = "yahoo" | "demo";
+export interface DataMeta {
+  source: "yahoo";
+  status: "available" | "unavailable";
+  symbol?: string;
+  fetchedAt: string | null;
+  observedAt: string | null;
+  delay: "unverified";
+  omittedBars?: number;
+}
+export const unavailableMeta = (): DataMeta => ({
+  source: "yahoo",
+  status: "unavailable",
+  fetchedAt: null,
+  observedAt: null,
+  delay: "unverified",
+});
+export interface MarketResult<T> {
+  data: T | null;
+  meta: DataMeta;
+  error: string | null;
+}
 export interface LiveInstrument {
   id: string;
   symbol: string;
   label: string;
   short: string;
-  price: number;
-  change: number;
-  changePercent: number;
-  high: number;
-  low: number;
-  volume: number;
+  price: number | null;
+  change: number | null;
+  changePercent: number | null;
+  high: number | null;
+  low: number | null;
+  volume: number | null;
   currency: string;
-  updatedAt: string;
+  meta: DataMeta;
 }
-
-export interface LiveCurve {
-  updatedAt: string;
-  structure: "backwardation" | "contango" | "flat";
-  promptSpread: number;
-  fullSpread: number;
-  contracts: LiveInstrument[];
-}
-
 export interface LiveExpiry {
   id: string;
   timestamp: number;
@@ -35,152 +46,154 @@ export interface LiveExpiry {
   future: number;
   days: number;
 }
-
 export interface LiveQuote {
   type: "call" | "put";
   strike: number;
   bid: number | null;
-  ask: number;
+  ask: number | null;
   last: number | null;
   mark: number | null;
-  iv: number;
-  delta: number;
-  gamma: number;
-  theta: number;
-  vega: number;
-  volume: number;
-  oi: number;
+  iv: number | null;
+  delta: number | null;
+  gamma: number | null;
+  theta: number | null;
+  vega: number | null;
+  volume: number | null;
+  oi: number | null;
+  lastTradeAt?: string | null;
+  expiry?: string;
 }
-
 export interface LiveOptionsData {
   underlying: string;
   underlyingPrice: number;
-  snapshot: string;
   expiries: LiveExpiry[];
   currentExpiry: string;
   strikes: number[];
   quotes: LiveQuote[];
+  meta: DataMeta;
+  greekSource: "unavailable";
+  greekNote: string;
+  quoteTimeNote: string;
 }
-
-const BASE_URL = "/api";
-
-export async function fetchLiveInstruments(): Promise<LiveInstrument[]> {
+const finite = (value: unknown): value is number =>
+  typeof value === "number" && Number.isFinite(value);
+const validMeta = (meta: DataMeta) =>
+  meta?.source === "yahoo" &&
+  meta.status === "available" &&
+  !!meta.fetchedAt &&
+  Number.isFinite(Date.parse(meta.fetchedAt)) &&
+  (meta.observedAt === null ||
+    (typeof meta.observedAt === "string" &&
+      Number.isFinite(Date.parse(meta.observedAt))));
+async function read(path: string, signal?: AbortSignal, timeout = 12000) {
+  const response = await fetch(`/api/${path}`, {
+    signal: signal
+      ? AbortSignal.any([signal, AbortSignal.timeout(timeout)])
+      : AbortSignal.timeout(timeout),
+  });
+  const payload = await response.json();
+  if (!response.ok || payload.success !== true)
+    throw new Error(payload.error ?? "Yahoo Finance data unavailable.");
+  return payload;
+}
+export async function fetchLiveInstruments(
+  signal?: AbortSignal,
+): Promise<LiveInstrument[]> {
   try {
-    const res = await fetch(`${BASE_URL}/instruments`);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
-    if (data.success && Array.isArray(data.instruments)) {
-      return data.instruments;
-    }
-  } catch (err) {
-    console.warn("[API] Instruments fallback to static fixtures:", err);
+    const payload = await read("instruments", signal);
+    return Array.isArray(payload.instruments)
+      ? payload.instruments.filter(
+          (item: LiveInstrument) =>
+            typeof item.id === "string" &&
+            typeof item.symbol === "string" &&
+            item.currency === "USD" &&
+            ((item.price === null && item.meta?.status === "unavailable") ||
+              (finite(item.price) && validMeta(item.meta))),
+        )
+      : [];
+  } catch {
+    return [];
   }
-  return [
-    {
-      id: "brent-dec26",
-      symbol: "BZ=F",
-      label: "Brent · Dec 2026",
-      short: "Dec 26",
-      price: 109.3,
-      change: -0.48,
-      changePercent: -0.44,
-      high: 110.25,
-      low: 106.82,
-      volume: 24357,
-      currency: "USD",
-      updatedAt: new Date().toISOString(),
-    },
-    {
-      id: "brent-jan27",
-      symbol: "BZF27.NYM",
-      label: "Brent · Jan 2027",
-      short: "Jan 27",
-      price: 106.14,
-      change: -0.32,
-      changePercent: -0.3,
-      high: 107.0,
-      low: 105.4,
-      volume: 12050,
-      currency: "USD",
-      updatedAt: new Date().toISOString(),
-    },
-    {
-      id: "brent-feb27",
-      symbol: "BZG27.NYM",
-      label: "Brent · Feb 2027",
-      short: "Feb 27",
-      price: 103.21,
-      change: -0.25,
-      changePercent: -0.24,
-      high: 104.1,
-      low: 102.8,
-      volume: 8740,
-      currency: "USD",
-      updatedAt: new Date().toISOString(),
-    },
-  ];
 }
-
 export async function fetchLiveBars(
   instrument: string,
   timeframe: "5m" | "15m" | "1h" = "5m",
   range = "5d",
-): Promise<Bar[]> {
+  signal?: AbortSignal,
+): Promise<MarketResult<Bar[]>> {
   try {
-    const res = await fetch(
-      `${BASE_URL}/bars?instrument=${encodeURIComponent(instrument)}&timeframe=${timeframe}&range=${range}`,
+    const payload = await read(
+      `bars?instrument=${encodeURIComponent(instrument)}&timeframe=${timeframe}&range=${encodeURIComponent(range)}`,
+      signal,
     );
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
-    if (data.success && Array.isArray(data.bars) && data.bars.length > 0) {
-      return data.bars;
-    }
-  } catch (err) {
-    console.warn(`[API] Bars fallback for ${instrument}:`, err);
+    if (
+      !validMeta(payload.meta) ||
+      !Array.isArray(payload.bars) ||
+      !payload.bars.length ||
+      !payload.bars.every(
+        (bar: Bar, index: number) =>
+          [bar.time, bar.open, bar.high, bar.low, bar.close].every(finite) &&
+          (index === 0 || bar.time > payload.bars[index - 1].time),
+      )
+    )
+      throw new Error("Valid observed chart bars unavailable.");
+    return { data: payload.bars, meta: payload.meta, error: null };
+  } catch (error) {
+    return {
+      data: null,
+      meta: unavailableMeta(),
+      error: error instanceof Error ? error.message : "Chart data unavailable.",
+    };
   }
-  return generateBars(instrument, timeframe);
 }
-
-export async function fetchLiveCurve(): Promise<LiveCurve | null> {
-  try {
-    const res = await fetch(`${BASE_URL}/curve`);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
-    if (data.success && data.curve) {
-      return data.curve;
-    }
-  } catch (err) {
-    console.warn("[API] Curve fallback:", err);
-  }
-  return null;
-}
-
 export async function fetchLiveOptions(
   symbol = "BNO",
   date: string | null = null,
-): Promise<LiveOptionsData | null> {
+  signal?: AbortSignal,
+): Promise<MarketResult<LiveOptionsData>> {
   try {
-    let url = `${BASE_URL}/options?symbol=${encodeURIComponent(symbol)}`;
-    if (date) url += `&date=${encodeURIComponent(date)}`;
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
-    if (data.success) {
-      return data;
-    }
-  } catch (err) {
-    console.warn(`[API] Options fallback for ${symbol}:`, err);
-  }
-  return null;
-}
-
-export async function checkLiveHealth(): Promise<boolean> {
-  try {
-    const res = await fetch(`${BASE_URL}/health`);
-    if (!res.ok) return false;
-    const data = await res.json();
-    return data.status === "ok";
-  } catch {
-    return false;
+    const payload = await read(
+      `options?symbol=${encodeURIComponent(symbol)}${date ? `&date=${encodeURIComponent(date)}` : ""}`,
+      signal,
+      30000,
+    );
+    if (
+      !validMeta(payload.meta) ||
+      payload.underlying !== symbol ||
+      !finite(payload.underlyingPrice) ||
+      !Array.isArray(payload.expiries) ||
+      !payload.expiries.length ||
+      !Array.isArray(payload.quotes) ||
+      !Array.isArray(payload.strikes) ||
+      !payload.quotes.length ||
+      (date && payload.currentExpiry !== date) ||
+      !payload.quotes.every(
+        (quote: LiveQuote) =>
+          finite(quote.strike) &&
+          quote.expiry === payload.currentExpiry &&
+          [
+            quote.bid,
+            quote.ask,
+            quote.last,
+            quote.mark,
+            quote.iv,
+            quote.delta,
+            quote.gamma,
+            quote.theta,
+            quote.vega,
+            quote.volume,
+            quote.oi,
+          ].every((value) => value === null || finite(value)),
+      )
+    )
+      throw new Error("Requested expiry snapshot unavailable.");
+    return { data: payload, meta: payload.meta, error: null };
+  } catch (error) {
+    return {
+      data: null,
+      meta: unavailableMeta(),
+      error:
+        error instanceof Error ? error.message : "Option data unavailable.",
+    };
   }
 }

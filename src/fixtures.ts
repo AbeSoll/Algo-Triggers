@@ -62,7 +62,7 @@ export function generateBars(
       close: group[group.length - 1].close,
       high: Math.max(...group.map((bar) => bar.high)),
       low: Math.min(...group.map((bar) => bar.low)),
-      volume: group.reduce((total, bar) => total + bar.volume, 0),
+      volume: group.reduce((total, bar) => total + (bar.volume ?? 0), 0),
     });
   }
   return bars;

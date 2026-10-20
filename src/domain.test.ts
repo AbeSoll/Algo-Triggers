@@ -285,7 +285,7 @@ describe("provenance, determinism, and causality", () => {
       Math.max(...source.slice(0, 12).map((bar) => bar.high)),
     );
     expect(hourly[0].volume).toBe(
-      source.slice(0, 12).reduce((sum, bar) => sum + bar.volume, 0),
+      source.slice(0, 12).reduce((sum, bar) => sum + (bar.volume ?? 0), 0),
     );
   });
 

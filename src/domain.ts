@@ -65,7 +65,7 @@ function conditionLabel(condition: Condition): string {
     case "ema_cross":
       return `EMA(${condition.period}) ${operator} EMA(${condition.slowPeriod})`;
     case "option_premium":
-      return `${condition.optionType ?? "Option"} ${condition.strike ?? "—"} ${condition.priceField ?? "unspecified field"} ${operator} ${format(condition.threshold)} USD/bbl`;
+      return `${condition.optionType ?? "Option"} ${condition.strike ?? "—"} ${condition.priceField ?? "unspecified field"} ${operator} ${format(condition.threshold)} ${condition.unit ?? (["BNO", "USO"].includes(condition.optionUnderlying ?? "") ? "USD/share" : "USD/bbl")}`;
   }
 }
 

@@ -43,13 +43,15 @@ import { generateBars, instruments, seedRules } from "./fixtures";
 import {
   fetchLiveInstruments,
   fetchLiveBars,
-  fetchLiveCurve,
   type LiveInstrument,
-  type LiveCurve,
+  unavailableMeta,
+  type DataMeta,
+  type MarketMode,
 } from "./api";
 import { replay, summarize } from "./domain";
 import { evaluateDemoStep } from "./monitor";
 import PriceChart from "./PriceChart";
+import DataSourceNotice from "./DataSourceNotice";
 import RuleEditor, { makeRule } from "./RuleEditor";
 import ReplayDialog, { type StoredRun } from "./ReplayDialog";
 import { Empty, Modal, money, timestamp } from "./ui";
@@ -139,7 +141,17 @@ function validRule(r: Rule) {
     typeof r.name === "string" &&
     Number.isInteger(r.version) &&
     r.version > 0 &&
-    instruments.some((i) => i.id === r.instrument) &&
+    (instruments.some((i) => i.id === r.instrument) ||
+      (["BNO", "USO"].includes(r.instrument) &&
+        Array.isArray(r.conditions) &&
+        r.conditions.every(
+          (c) =>
+            c.metric === "option_premium" &&
+            c.optionUnderlying === r.instrument &&
+            (c.optionType === "call" || c.optionType === "put") &&
+            Number.isFinite(c.strike) &&
+            typeof c.optionExpiry === "string",
+        ))) &&
     ["AND", "OR"].includes(r.join) &&
     ["crossing", "bar", "once"].includes(r.frequency) &&
     ["draft", "monitoring", "paused"].includes(r.status) &&
@@ -241,85 +253,117 @@ export default function App() {
   const rules = useMemo(() => latest(store.rules), [store.rules]);
 
   // Live Yahoo Finance data state
+  const [dataMode, setDataMode] = useState<MarketMode>(() => {
+    try {
+      return localStorage.getItem("algo-triggers-market-source") === "demo"
+        ? "demo"
+        : "yahoo";
+    } catch {
+      return "yahoo";
+    }
+  });
   const [liveInstruments, setLiveInstruments] = useState<LiveInstrument[]>([]);
-  const [liveBars, setLiveBars] = useState<Bar[]>(() =>
-    generateBars(instrument, timeframe),
-  );
+  const [liveBars, setLiveBars] = useState<Bar[]>([]);
+  const [barMeta, setBarMeta] = useState<DataMeta>(unavailableMeta);
+  const [barError, setBarError] = useState("");
+  const [barContext, setBarContext] = useState("");
   const [isLiveLoading, setIsLiveLoading] = useState(false);
-  const [liveConnected, setLiveConnected] = useState(true);
-  const [lastLiveUpdate, setLastLiveUpdate] = useState<Date>(new Date());
-  const [liveCurveData, setLiveCurveData] = useState<LiveCurve | null>(null);
-
+  const barRequest = useRef(0);
+  const barController = useRef<AbortController | null>(null);
+  const currentBarContext = `${instrument}:${timeframe}:${range}`;
   useEffect(() => {
     let mounted = true;
-    const loadInst = async () => {
-      const list = await fetchLiveInstruments();
-      if (mounted && list.length > 0) {
-        setLiveInstruments(list);
-      }
+    let controller: AbortController | null = null;
+    setLiveInstruments([]);
+    if (dataMode === "demo") return;
+    const load = async () => {
+      controller?.abort();
+      controller = new AbortController();
+      const list = await fetchLiveInstruments(controller.signal);
+      if (mounted) setLiveInstruments(list);
     };
-    loadInst();
-    const timer = setInterval(loadInst, 20000);
+    load();
+    const timer = setInterval(load, 20000);
     return () => {
       mounted = false;
+      controller?.abort();
       clearInterval(timer);
     };
-  }, []);
-
+  }, [dataMode]);
   const reloadLiveBars = useCallback(
     async (showLoading = true) => {
-      if (showLoading) setIsLiveLoading(true);
-      try {
-        const data = await fetchLiveBars(instrument, timeframe, range);
-        if (data && data.length > 0) {
-          setLiveBars(data);
-          setLiveConnected(true);
-          setLastLiveUpdate(new Date());
-        }
-      } catch (err) {
-        console.warn("[Live Bars Error]:", err);
-        setLiveConnected(false);
-      } finally {
-        if (showLoading) setIsLiveLoading(false);
+      const request = ++barRequest.current;
+      barController.current?.abort();
+      if (dataMode === "demo") {
+        setIsLiveLoading(false);
+        return;
       }
+      const controller = new AbortController();
+      barController.current = controller;
+      if (showLoading) setIsLiveLoading(true);
+      const result = await fetchLiveBars(
+        instrument,
+        timeframe,
+        range,
+        controller.signal,
+      );
+      if (request !== barRequest.current) return;
+      setLiveBars(result.data ?? []);
+      setBarMeta(result.meta);
+      setBarError(result.error ?? "");
+      setBarContext(`${instrument}:${timeframe}:${range}`);
+      setIsLiveLoading(false);
     },
-    [instrument, timeframe, range],
+    [instrument, timeframe, range, dataMode],
   );
-
   useEffect(() => {
-    reloadLiveBars(true);
-    const timer = setInterval(() => {
-      reloadLiveBars(false);
-    }, 15000);
-    return () => clearInterval(timer);
+    reloadLiveBars();
+    const timer = setInterval(() => reloadLiveBars(false), 15000);
+    return () => {
+      barRequest.current++;
+      barController.current?.abort();
+      clearInterval(timer);
+    };
   }, [reloadLiveBars]);
-
-  useEffect(() => {
-    if (chartTab === "curve") {
-      fetchLiveCurve().then((c) => {
-        if (c) setLiveCurveData(c);
-      });
-    }
-  }, [chartTab]);
-
-  const bars = liveBars;
+  const chartDataMode: MarketMode = selectedEvent ? "demo" : dataMode;
+  const bars = useMemo(
+    () =>
+      chartDataMode === "demo"
+        ? generateBars(instrument, timeframe)
+        : barContext === currentBarContext
+          ? liveBars
+          : [],
+    [
+      chartDataMode,
+      instrument,
+      timeframe,
+      barContext,
+      currentBarContext,
+      liveBars,
+    ],
+  );
+  const chartMeta =
+    barContext === currentBarContext ? barMeta : unavailableMeta();
   const visibleBars = useMemo(
-    () => (range === "1D" ? bars.slice(-Math.floor(bars.length / 5)) : bars),
-    [bars, range],
+    () =>
+      chartDataMode === "demo" && range === "1D"
+        ? bars.slice(-Math.floor(bars.length / 5))
+        : bars,
+    [bars, range, chartDataMode],
   );
   const last = bars.at(-1) ?? {
-    time: Date.now(),
-    open: 109.3,
-    high: 109.3,
-    low: 109.3,
-    close: 109.3,
+    time: 0,
+    open: 0,
+    high: 0,
+    low: 0,
+    close: 0,
     volume: 0,
   };
   const first = bars[0] ?? last;
   const change = last.close - first.close;
   const currentLiveMeta = liveInstruments.find((i) => i.id === instrument);
   const instrumentLabel =
-    currentLiveMeta?.label ??
+    (chartDataMode === "yahoo" ? currentLiveMeta?.label : undefined) ??
     instruments.find((i) => i.id === instrument)?.label ??
     instrument;
   const filteredRules = rules.filter(
@@ -564,10 +608,15 @@ export default function App() {
     return false;
   }
   function exportCsv() {
+    if (!visibleBars.length) return;
     const data = [
-      "timestamp_utc,open,high,low,close,volume",
+      "source,symbol,observed_at_utc,fetched_at_utc,timestamp_utc,open,high,low,close,volume",
       ...visibleBars.map((b) =>
         [
+          chartDataMode === "demo" ? "synthetic" : "yahoo",
+          chartDataMode === "demo" ? instrument : (chartMeta.symbol ?? ""),
+          chartDataMode === "demo" ? "" : (chartMeta.observedAt ?? ""),
+          chartDataMode === "demo" ? "" : (chartMeta.fetchedAt ?? ""),
           new Date(b.time).toISOString(),
           b.open,
           b.high,
@@ -580,10 +629,12 @@ export default function App() {
     const link = document.createElement("a");
     const url = URL.createObjectURL(new Blob([data], { type: "text/csv" }));
     link.href = url;
-    link.download = `algo-triggers-synthetic-${instrument}-${timeframe}.csv`;
+    link.download = `algo-triggers-${chartDataMode}-${instrument}-${timeframe}.csv`;
     link.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
-    setNotice("Synthetic chart bars exported as CSV.");
+    setNotice(
+      `${chartDataMode === "demo" ? "Synthetic sample" : "Yahoo snapshot"} chart bars exported as CSV.`,
+    );
   }
   const setViewLink = (target: View) => ({
     href: `?view=${target}`,
@@ -623,8 +674,10 @@ export default function App() {
                   </button>
                   <p className="rule-summary">{summarize(rule)}</p>
                   <span className="table-meta">
-                    {instruments.find((i) => i.id === rule.instrument)?.short} ·{" "}
-                    {rule.timeframe ?? "5m"} · {rule.cooldownMinutes}m cooldown
+                    {instruments.find((i) => i.id === rule.instrument)?.short ??
+                      rule.instrument}{" "}
+                    · {rule.timeframe ?? "5m"} · {rule.cooldownMinutes}m
+                    cooldown
                   </span>
                 </td>
                 <td>
@@ -642,35 +695,50 @@ export default function App() {
                   </span>
                 </td>
                 <td>
-                  <div className="row-actions">
-                    <button
-                      className="icon-button"
-                      aria-label={`Run replay for ${rule.name}`}
-                      onClick={() => setTestRule(rule)}
-                      title="Run replay"
-                    >
-                      <Play size={15} />
-                    </button>
-                    <button
-                      className="icon-button"
-                      aria-label={`${rule.status === "monitoring" ? "Pause" : "Start demo monitoring for"} ${rule.name}`}
-                      onClick={() => status(rule)}
-                      title={
-                        rule.status === "monitoring"
+                  <div
+                    className="row-actions"
+                    role="group"
+                    aria-label={`Actions for ${rule.name}`}
+                    onFocus={(event) =>
+                      event.target.scrollIntoView({
+                        block: "nearest",
+                        inline: "nearest",
+                      })
+                    }
+                  >
+                    <div className="rule-primary-actions">
+                      <button
+                        className="btn btn-outline btn-small"
+                        aria-label={`Test rule: ${rule.name}`}
+                        onClick={() => setTestRule(rule)}
+                        title="Test this rule on sample history"
+                      >
+                        <Play size={15} /> Test rule
+                      </button>
+                      <button
+                        className="btn btn-outline btn-small"
+                        aria-label={`${rule.status === "monitoring" ? "Pause" : "Start demo monitoring for"} ${rule.name}`}
+                        onClick={() => status(rule)}
+                        title={
+                          rule.status === "monitoring"
+                            ? "Pause"
+                            : "Start demo monitoring"
+                        }
+                      >
+                        {rule.status === "monitoring" ? (
+                          <Pause size={15} />
+                        ) : (
+                          <Radio size={15} />
+                        )}
+                        {rule.status === "monitoring"
                           ? "Pause"
-                          : "Start demo monitoring"
-                      }
-                    >
-                      {rule.status === "monitoring" ? (
-                        <Pause size={15} />
-                      ) : (
-                        <Radio size={15} />
-                      )}
-                    </button>
+                          : "Monitor demo"}
+                      </button>
+                    </div>
                     {!compact && (
-                      <>
+                      <div className="rule-secondary-actions">
                         <button
-                          className="icon-button"
+                          className="text-button"
                           aria-label={`Edit ${rule.name}`}
                           title="Edit as new version"
                           onClick={() =>
@@ -682,17 +750,17 @@ export default function App() {
                             })
                           }
                         >
-                          <SlidersHorizontal size={15} />
+                          <SlidersHorizontal size={15} /> Edit
                         </button>
                         <button
-                          className="icon-button"
+                          className="text-button"
                           title="Duplicate"
                           aria-label={`Duplicate ${rule.name}`}
                           onClick={() => duplicate(rule)}
                         >
-                          <Copy size={15} />
+                          <Copy size={15} /> Duplicate
                         </button>
-                      </>
+                      </div>
                     )}
                   </div>
                 </td>
@@ -790,14 +858,18 @@ export default function App() {
         </div>
         <div className="sidebar-bottom">
           <div className="demo-side">
-            <span className="demo-orbit" style={{ background: "rgba(8,125,104,0.18)", color: "#087d68" }}>
+            <span
+              className="demo-orbit"
+              style={{ background: "rgba(8,125,104,0.18)", color: "#087d68" }}
+            >
               <Activity size={18} />
             </span>
-            <strong>Live Yahoo Finance Feed</strong>
-            <p>Connected to NYMEX/ICE live Brent & WTI quotes, curve and options chain.</p>
-            <span className="side-demo-badge" style={{ background: "rgba(8,125,104,0.22)", color: "#087d68" }}>
-              LIVE MARKET FEED
-            </span>
+            <strong>Market snapshots</strong>
+            <p>
+              Yahoo observations or explicitly selected demo samples. Rule tests
+              and monitoring use synthetic data.
+            </p>
+            <span className="side-demo-badge">No automatic trading</span>
           </div>
           <button onClick={() => setHelp(true)} className="sidebar-help">
             <CircleHelp size={17} />
@@ -826,27 +898,26 @@ export default function App() {
             <strong>Brent crude</strong>
           </div>
           <div className="topbar-right">
-            <span
-              className="demo-top"
-              style={{
-                color: liveConnected ? "#087d68" : "#c4962e",
-                background: liveConnected ? "rgba(8,125,104,0.1)" : "rgba(196,150,46,0.1)",
-                padding: "4px 9px",
-                borderRadius: "6px",
-                fontWeight: 600,
-              }}
-            >
-              <span className={`dot ${liveConnected ? "green" : "amber"}`} />
-              {liveConnected ? "Live Yahoo Finance (BZ=F)" : "Offline fallback"}
-            </span>
-            <span className="topbar-time">
-              {new Date().toLocaleDateString("en-GB", {
-                day: "2-digit",
-                month: "short",
-                year: "numeric",
-              })}{" "}
-              · Live
-            </span>
+            <label className="source-select">
+              Market data
+              <select
+                value={dataMode}
+                onChange={(e) => {
+                  const next = e.target.value as MarketMode;
+                  setDataMode(next);
+                  setHealth("healthy");
+                  setSelectedEvent(null);
+                  try {
+                    localStorage.setItem("algo-triggers-market-source", next);
+                  } catch {
+                    /* Source remains usable for this session. */
+                  }
+                }}
+              >
+                <option value="yahoo">Yahoo snapshots</option>
+                <option value="demo">Demo samples</option>
+              </select>
+            </label>
             <button
               className="icon-button mobile-settings"
               aria-label="Workspace settings"
@@ -867,7 +938,7 @@ export default function App() {
         <main id="main-content">
           <div className="page-heading">
             <div>
-              <div className="eyebrow">ICE BRENT · RESEARCH DEMO</div>
+              <div className="eyebrow">BRENT RESEARCH · SNAPSHOTS & DEMO</div>
               <h1>
                 {names[view]}
                 <span className="heading-dot">.</span>
@@ -924,6 +995,12 @@ export default function App() {
               </>
             )}
           </div>
+          {(view === "rules" || view === "history") && (
+            <p className="notice">
+              Rule tests and monitoring use synthetic samples · 12–16 Oct 2026.
+              The market data selector controls market displays only.
+            </p>
+          )}
           {view === "market" && (
             <>
               <div className="quote-strip">
@@ -934,41 +1011,74 @@ export default function App() {
                     <span className="badge">Futures</span>
                   </span>
                   <div className="quote-value">
-                    ${money(last.close)}
+                    {bars.length ? `$${money(last.close)}` : "—"}
                     <small>USD/bbl</small>
-                    <span className={change >= 0 ? "up" : "down"}>
-                      {change >= 0 ? (
-                        <ArrowUpRight size={16} />
-                      ) : (
-                        <ArrowDownRight size={16} />
-                      )}{" "}
-                      {change >= 0 ? "+" : ""}
-                      {change.toFixed(2)}{" "}
-                      <small>
-                        ({((change / first.close) * 100).toFixed(2)}%)
-                      </small>
-                    </span>
+                    {bars.length > 0 && (
+                      <span className={change >= 0 ? "up" : "down"}>
+                        {change >= 0 ? (
+                          <ArrowUpRight size={16} />
+                        ) : (
+                          <ArrowDownRight size={16} />
+                        )}{" "}
+                        {change >= 0 ? "+" : ""}
+                        {change.toFixed(2)}{" "}
+                        <small>
+                          ({((change / first.close) * 100).toFixed(2)}%)
+                        </small>
+                      </span>
+                    )}
                   </div>
                 </div>
                 <div className="quote-detail">
-                  <span>5-day high</span>
-                  <strong>{money(Math.max(...bars.map((b) => b.high)))}</strong>
+                  <span>Displayed high</span>
+                  <strong>
+                    {bars.length
+                      ? money(Math.max(...visibleBars.map((b) => b.high)))
+                      : "—"}
+                  </strong>
                 </div>
                 <div className="quote-detail">
-                  <span>5-day low</span>
-                  <strong>{money(Math.min(...bars.map((b) => b.low)))}</strong>
+                  <span>Displayed low</span>
+                  <strong>
+                    {bars.length
+                      ? money(Math.min(...visibleBars.map((b) => b.low)))
+                      : "—"}
+                  </strong>
                 </div>
                 <div className="quote-detail quote-health">
                   <span>Data source</span>
                   <strong>
-                    <span className={`dot ${liveConnected ? "green" : "amber"}`} />
-                    {liveConnected ? "Yahoo Finance Live" : "Cached fallback"}
+                    {chartDataMode === "demo"
+                      ? "Synthetic sample"
+                      : chartMeta.status === "available"
+                        ? "Yahoo snapshot"
+                        : "Unavailable"}
                   </strong>
                   <small>
-                    {currentLiveMeta?.symbol ?? "BZ=F"} · {timestamp(last.time)} UTC
+                    {chartDataMode === "demo"
+                      ? "12–16 Oct 2026 · UTC"
+                      : (chartMeta.symbol ?? "Listed contract")}
                   </small>
                 </div>
               </div>
+              <DataSourceNotice
+                mode={chartDataMode}
+                meta={chartMeta}
+                loading={chartDataMode === "yahoo" && isLiveLoading}
+                label="Chart"
+              />
+              {selectedEvent && (
+                <p className="notice">
+                  Viewing synthetic event evidence. This chart uses the original
+                  demo dataset.
+                  <button
+                    className="text-button"
+                    onClick={() => setSelectedEvent(null)}
+                  >
+                    Return to market data
+                  </button>
+                </p>
+              )}
               <div className="market-grid">
                 <section className="panel market-panel">
                   <div className="panel-heading">
@@ -988,19 +1098,29 @@ export default function App() {
                         Futures curve
                       </button>
                     </div>
-                    <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+                    <div
+                      style={{
+                        display: "flex",
+                        gap: "6px",
+                        alignItems: "center",
+                      }}
+                    >
                       <button
                         className="icon-button"
                         onClick={() => reloadLiveBars(true)}
-                        aria-label="Refresh live data"
-                        title="Refresh live data from Yahoo Finance"
+                        aria-label="Refresh market snapshot"
+                        title="Refresh the selected Yahoo snapshot"
                       >
-                        <RefreshCw size={16} className={isLiveLoading ? "spinner" : ""} />
+                        <RefreshCw
+                          size={16}
+                          className={isLiveLoading ? "spinner" : ""}
+                        />
                       </button>
                       <button
                         className="icon-button"
                         onClick={exportCsv}
                         aria-label="Export chart data"
+                        disabled={!bars.length}
                       >
                         <Download size={17} />
                       </button>
@@ -1082,22 +1202,47 @@ export default function App() {
                         Restore demo data
                       </button>
                     </Empty>
+                  ) : chartTab === "price" && !bars.length ? (
+                    <Empty
+                      title={
+                        isLiveLoading
+                          ? "Loading market snapshot"
+                          : "Market data unavailable"
+                      }
+                    >
+                      {isLiveLoading
+                        ? "Requesting the selected contract from Yahoo Finance."
+                        : `${barError || "No observed bars returned."} Retry, or explicitly select Demo samples to explore sample data.`}
+                      <button
+                        className="btn btn-outline"
+                        disabled={isLiveLoading}
+                        onClick={() => reloadLiveBars()}
+                      >
+                        Retry market data
+                      </button>
+                    </Empty>
                   ) : chartTab === "price" ? (
                     <PriceChart
+                      dataMode={chartDataMode}
+                      viewportKey={`${instrument}:${timeframe}:${range}:${chartDataMode}`}
                       bars={visibleBars}
                       allBars={bars}
-                      events={store.events.filter(
-                        (e) =>
-                          e.instrument === instrument &&
-                          (e.timeframe ?? "5m") === timeframe,
-                      )}
+                      events={
+                        chartDataMode === "demo"
+                          ? store.events.filter(
+                              (e) =>
+                                e.instrument === instrument &&
+                                (e.timeframe ?? "5m") === timeframe,
+                            )
+                          : []
+                      }
                       key={selectedEvent?.id ?? instrument}
                       threshold={
                         selectedEvent
                           ? selectedRule?.conditions.find(
                               (c) => c.metric === "price",
                             )?.threshold
-                          : 82.5
+                          : undefined
                       }
                       ruleCondition={selectedRule?.conditions.find(
                         (c) =>
@@ -1114,6 +1259,7 @@ export default function App() {
                       far={curveFar}
                       setNear={setCurveNear}
                       setFar={setCurveFar}
+                      dataMode={dataMode}
                       liveInstruments={liveInstruments}
                       onContract={(id) => {
                         setInstrument(id);
@@ -1353,8 +1499,7 @@ export default function App() {
                   </div>
                 ) : (
                   <Empty title="Your first replay starts with a rule">
-                    Select the play button beside a saved rule to build a
-                    report.
+                    Select Test rule beside a saved rule to build a report.
                   </Empty>
                 )}
               </section>
@@ -1370,7 +1515,11 @@ export default function App() {
               }
             >
               {health === "healthy" ? (
-                <OptionsLab instrument={instrument} onCreateRule={create} />
+                <OptionsLab
+                  dataMode={dataMode}
+                  instrument={instrument}
+                  onCreateRule={create}
+                />
               ) : (
                 <section className="panel">
                   <Empty
@@ -1454,7 +1603,8 @@ export default function App() {
           <footer className="workspace-footer">
             <span>
               <FlaskConical size={13} />
-              Synthetic research demo · no real market data or order execution
+              Research workspace · rule tests and monitoring use synthetic
+              samples · no order execution
             </span>
             <button className="text-button" onClick={() => setHelp(true)}>
               Data & methodology <ArrowUpRight size={12} />
@@ -1503,42 +1653,77 @@ export default function App() {
               {detail.timeframe ?? "5m"} bar close
             </p>
           </div>
-          <div className="table-wrap">
-            <table>
-              <caption>
-                Condition diagnostics · unrounded inputs, values shown to six
-                decimals
-              </caption>
-              <thead>
-                <tr>
-                  <th>Condition</th>
-                  <th>Observed</th>
-                  <th>Reference</th>
-                  <th>Result</th>
-                </tr>
-              </thead>
-              <tbody>
-                {detail.diagnostics.map((d, i) => (
-                  <tr key={i}>
-                    <td>{d.label}</td>
-                    <td>
-                      {d.actual === null ? "Unavailable" : d.actual.toFixed(6)}
-                    </td>
-                    <td>
-                      {d.reference === null
-                        ? "Unavailable"
-                        : d.reference.toFixed(6)}
-                    </td>
-                    <td>
-                      <span className={`badge ${d.met ? "badge-green" : ""}`}>
-                        {d.met === null ? "Unknown" : d.met ? "Met" : "Not met"}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="rule-live-card evidence-explanation">
+            <strong>Why this alert happened</strong>
+            <p>
+              {(() => {
+                const snapshot =
+                  store.rules.find(
+                    (r) =>
+                      r.id === detail.ruleId &&
+                      r.version === detail.ruleVersion,
+                  ) ??
+                  store.runs.find(
+                    (r) =>
+                      r.rule.id === detail.ruleId &&
+                      r.rule.version === detail.ruleVersion,
+                  )?.rule;
+                return snapshot
+                  ? summarize(snapshot)
+                  : "This event retains the condition results recorded when the alert was emitted.";
+              })()}
+            </p>
+            <small>
+              {detail.diagnostics.filter((d) => d.met === true).length} of{" "}
+              {detail.diagnostics.length} conditions met. The rule’s combination
+              and alert policy determined this event.
+            </small>
           </div>
+          <details className="advanced evidence-details">
+            <summary>View condition values</summary>
+            <div className="table-wrap">
+              <table>
+                <caption>
+                  Condition diagnostics · unrounded inputs, values shown to six
+                  decimals
+                </caption>
+                <thead>
+                  <tr>
+                    <th>Condition</th>
+                    <th>Observed</th>
+                    <th>Reference</th>
+                    <th>Result</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {detail.diagnostics.map((d, i) => (
+                    <tr key={i}>
+                      <td>{d.label}</td>
+                      <td>
+                        {d.actual === null
+                          ? "Unavailable"
+                          : d.actual.toFixed(6)}
+                      </td>
+                      <td>
+                        {d.reference === null
+                          ? "Unavailable"
+                          : d.reference.toFixed(6)}
+                      </td>
+                      <td>
+                        <span className={`badge ${d.met ? "badge-green" : ""}`}>
+                          {d.met === null
+                            ? "Unknown"
+                            : d.met
+                              ? "Met"
+                              : "Not met"}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </details>
           <p className="notice">
             Source: deterministic synthetic fixture. In-app event recorded; no
             external notification was sent. This event counts a condition, not a
@@ -1681,8 +1866,8 @@ export default function App() {
               <section>
                 <h3>Find a pattern</h3>
                 <p>
-                  Explore synthetic Brent futures. Candles and SMA/EMA overlays
-                  use the same sample bars as replay.
+                  Explore Yahoo snapshots or synthetic demo futures. Candles and
+                  SMA/EMA overlays use the same sample bars as replay.
                 </p>
               </section>
             </div>
@@ -1709,10 +1894,12 @@ export default function App() {
             </div>
           </div>
           <p className="notice">
-            Synthetic dataset: 12–16 October 2026, UTC. Demo contract metadata,
-            option quotes and Greeks are illustrative. No licensed ICE data is
-            connected. Demo monitoring advances only when you press Advance demo
-            bar and stops when this browser closes.
+            Market pages offer Yahoo snapshots or explicit demo samples. Yahoo
+            availability and delay are unverified; BNO/USO are oil funds, not
+            ICE futures options. Demo data and all rule tests use 12–16 October
+            2026 synthetic bars. No licensed ICE feed is connected. Demo
+            monitoring advances only when you press Advance demo bar and stops
+            when this browser closes.
           </p>
           <button className="btn btn-primary" onClick={() => setHelp(false)}>
             Back to research <ArrowRight size={15} />
@@ -1725,6 +1912,7 @@ export default function App() {
             Demo data health
             <select
               value={health}
+              disabled={dataMode !== "demo"}
               onChange={(e) => setHealth(e.target.value as typeof health)}
             >
               <option value="healthy">Healthy synthetic data</option>
@@ -1840,6 +2028,7 @@ function Curve({
   setFar,
   onContract,
   liveInstruments,
+  dataMode,
 }: {
   near: string;
   far: string;
@@ -1847,12 +2036,29 @@ function Curve({
   setFar: (v: string) => void;
   onContract: (id: string) => void;
   liveInstruments?: LiveInstrument[];
+  dataMode: MarketMode;
 }) {
+  const missing =
+    dataMode === "yahoo" &&
+    instruments.some(
+      (i) => liveInstruments?.find((quote) => quote.id === i.id)?.price == null,
+    );
+  if (missing)
+    return (
+      <Empty title="Curve data unavailable">
+        All listed contract quotes are required for this curve. Missing
+        observations are not replaced with sample prices.
+      </Empty>
+    );
   const prices = instruments.map((i) => {
     const live = liveInstruments?.find((li) => li.id === i.id);
     return {
       ...i,
-      price: live ? live.price : generateBars(i.id, "5m").at(-1)!.close,
+      price:
+        dataMode === "yahoo"
+          ? live!.price!
+          : generateBars(i.id, "5m").at(-1)!.close,
+      meta: live?.meta,
     };
   });
   const nearPrice = prices.find((p) => p.id === near)!.price,
@@ -1898,6 +2104,13 @@ function Curve({
   const gridCount = 4;
   return (
     <div className="curve-view">
+      <DataSourceNotice mode={dataMode} label="Curve" meta={prices[0].meta} />
+      {dataMode === "yahoo" && (
+        <p className="hint">
+          Each contract has its own quote time; this is not a synchronized
+          exchange snapshot.
+        </p>
+      )}
       <div className="curve-summary">
         <div>
           <span className="eyebrow">LISTED CONTRACT SNAPSHOT</span>
@@ -1932,7 +2145,7 @@ function Curve({
       <svg
         viewBox={`0 0 ${W} ${H}`}
         role="img"
-        aria-label="Synthetic futures curve. Three prices are listed with contract actions below."
+        aria-label={`${dataMode === "demo" ? "Synthetic" : "Yahoo snapshot"} futures curve. Listed contract prices appear below.`}
         style={{ overflow: "visible" }}
       >
         <defs>
@@ -2076,6 +2289,14 @@ function Curve({
             onClick={() => onContract(p.id)}
           >
             {p.short} · ${money(p.price)}
+            {dataMode === "yahoo" && (
+              <small>
+                Quote:{" "}
+                {p.meta?.observedAt
+                  ? `${timestamp(Date.parse(p.meta.observedAt))} UTC`
+                  : "Not supplied"}
+              </small>
+            )}
             <ArrowUpRight size={13} />
           </button>
         ))}
@@ -2104,7 +2325,7 @@ function Curve({
       </div>
       <p className="hint">
         Formula: {money(nearPrice)} − {money(farPrice)} = {diff.toFixed(2)}{" "}
-        USD/bbl. Quotes share the same synthetic timestamp. Curve rules and
+        USD/bbl. Source and quote times are shown above. Curve rules and
         historical overlays are planned; individual contract selection is
         available now.
       </p>

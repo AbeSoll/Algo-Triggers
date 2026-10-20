@@ -14,10 +14,13 @@ import type { Rule } from "./types";
 import {
   fetchLiveOptions,
   type LiveOptionsData,
+  type MarketMode,
   type LiveQuote,
   type LiveExpiry,
 } from "./api";
 import "./options.css";
+import DataSourceNotice from "./DataSourceNotice";
+import { Empty, timestamp } from "./ui";
 
 type OptionType = "call" | "put";
 type PriceField = "bid" | "ask" | "last" | "mark";
@@ -30,21 +33,7 @@ interface Expiry {
   future: number;
   days: number;
 }
-interface Quote {
-  type: OptionType;
-  strike: number;
-  bid: number | null;
-  ask: number;
-  last: number | null;
-  mark: number | null;
-  iv: number;
-  delta: number;
-  gamma: number;
-  theta: number;
-  vega: number;
-  volume: number;
-  oi: number;
-}
+type Quote = LiveQuote;
 interface Leg {
   id: number;
   type: OptionType;
@@ -72,9 +61,11 @@ const EXPIRIES: Expiry[] = [
 const STRIKES = [76, 78, 80, 82, 84, 86, 88, 90];
 const SNAPSHOT = "19 Oct 2026 · 02:30 UTC";
 const number = (value: number | null, digits = 2) =>
-  value === null ? "—" : value.toFixed(digits);
-const signed = (value: number, digits = 2) =>
-  `${value >= 0 ? "+" : "−"}${Math.abs(value).toFixed(digits)}`;
+  value === null || !Number.isFinite(value) ? "—" : value.toFixed(digits);
+const signed = (value: number | null, digits = 2) =>
+  value === null || !Number.isFinite(value)
+    ? "—"
+    : `${value >= 0 ? "+" : "−"}${Math.abs(value).toFixed(digits)}`;
 
 // Deliberately illustrative supplied fixtures, not exchange quotes or model valuations.
 function quoteFor(expiry: Expiry, strike: number, type: OptionType): Quote {
@@ -128,19 +119,39 @@ function templateLegs(template: Template): Leg[] {
 
 export default function OptionsLab({
   instrument,
+  dataMode,
   onCreateRule,
 }: {
   instrument: string;
+  dataMode: MarketMode;
   onCreateRule: (partial: Partial<Rule>) => void;
 }) {
-  const [underlyingSymbol, setUnderlyingSymbol] = useState<"BNO" | "USO">("BNO");
-  const [liveOptions, setLiveOptions] = useState<LiveOptionsData | null>(null);
-  const [isOptionsLoading, setIsOptionsLoading] = useState(false);
+  const [underlyingSymbol, setUnderlyingSymbol] = useState<"BNO" | "USO">(
+    "BNO",
+  );
+  const [optionsSnapshot, setLiveOptions] = useState<LiveOptionsData | null>(
+    null,
+  );
+  const [isOptionsLoading, setIsOptionsLoading] = useState(
+    dataMode === "yahoo",
+  );
+  const [requestedExpiry, setRequestedExpiry] = useState<string | null>(null);
+  const [expiryChoices, setExpiryChoices] = useState<Expiry[]>([]);
+  const [optionsError, setOptionsError] = useState("");
+  const [retry, setRetry] = useState(0);
+  const initializedSource = useRef("");
+  const liveOptions =
+    dataMode === "yahoo" &&
+    optionsSnapshot?.underlying === underlyingSymbol &&
+    (!requestedExpiry || optionsSnapshot.currentExpiry === requestedExpiry)
+      ? optionsSnapshot
+      : null;
+  const unit = dataMode === "demo" ? "USD/bbl" : "USD/share";
 
   const [expiryId, setExpiryId] = useState(
     EXPIRIES[instrument === "brent-feb27" ? 1 : 0].id,
   );
-  const [view, setView] = useState<"chain" | "surface">("chain");
+  const [view, setView] = useState<"chain" | "surface" | "strategy">("chain");
   const [priceField, setPriceField] = useState<PriceField>("mark");
   const [typeFilter, setTypeFilter] = useState<"all" | OptionType>("all");
   const [strikeFilter, setStrikeFilter] = useState("all");
@@ -177,91 +188,114 @@ export default function OptionsLab({
   // Fetch live options chain on mount or underlying change
   useEffect(() => {
     let mounted = true;
+    const controller = new AbortController();
+    setLiveOptions(null);
+    setOptionsError("");
+    if (dataMode === "demo") {
+      setIsOptionsLoading(false);
+      setExpiryId(EXPIRIES[instrument === "brent-feb27" ? 1 : 0].id);
+      if (initializedSource.current !== `demo:${instrument}`) {
+        setLegs(templateLegs("put-spread"));
+        setTemplate("put-spread");
+        initializedSource.current = `demo:${instrument}`;
+      }
+      return () => {
+        mounted = false;
+      };
+    }
     setIsOptionsLoading(true);
-    fetchLiveOptions(underlyingSymbol).then((data) => {
-      if (mounted && data) {
+    fetchLiveOptions(underlyingSymbol, requestedExpiry, controller.signal).then(
+      (result) => {
+        if (!mounted) return;
+        const data = result.data;
+        setOptionsError(result.error ?? "");
         setLiveOptions(data);
-        if (data.expiries.length > 0) {
-          setExpiryId(data.expiries[0].id);
-        }
-        if (data.strikes.length > 0) {
-          const atm = data.strikes.reduce((prev, curr) =>
-            Math.abs(curr - data.underlyingPrice) < Math.abs(prev - data.underlyingPrice) ? curr : prev,
-          );
-          setSelected({ strike: atm, type: "call" });
-          const atmIdx = data.strikes.indexOf(atm);
-          const lowerStrike = data.strikes[Math.max(0, atmIdx - 2)] ?? (atm - 2);
+        setIsOptionsLoading(false);
+        if (!data) return;
+        setExpiryChoices(data.expiries);
+        setExpiryId(data.currentExpiry);
+        const atm = data.strikes.reduce((previous, current) =>
+          Math.abs(current - data.underlyingPrice) <
+          Math.abs(previous - data.underlyingPrice)
+            ? current
+            : previous,
+        );
+        setSelected({ strike: atm, type: "call" });
+        if (initializedSource.current !== `yahoo:${underlyingSymbol}`) {
+          initializedSource.current = `yahoo:${underlyingSymbol}`;
+          const index = data.strikes.indexOf(atm);
+          setTemplate("put-spread");
           setLegs([
             { id: 1, type: "put", strike: atm, quantity: 1 },
-            { id: 2, type: "put", strike: lowerStrike, quantity: -1 },
+            {
+              id: 2,
+              type: "put",
+              strike: data.strikes[Math.max(0, index - 1)],
+              quantity: -1,
+            },
           ]);
         }
-      }
-      if (mounted) setIsOptionsLoading(false);
-    });
+      },
+    );
     return () => {
       mounted = false;
+      controller.abort();
     };
-  }, [underlyingSymbol]);
+  }, [underlyingSymbol, requestedExpiry, dataMode, instrument, retry]);
 
-  const expiries: Expiry[] = useMemo(() => {
-    if (liveOptions && liveOptions.expiries.length > 0) {
-      return liveOptions.expiries.map((e) => ({
-        id: e.id,
-        label: e.label,
-        underlying: e.underlying,
-        reference: e.reference,
-        future: e.future,
-        days: e.days,
-      }));
-    }
-    return EXPIRIES;
-  }, [liveOptions]);
-
-  const strikes: number[] = useMemo(() => {
-    if (liveOptions && liveOptions.strikes.length > 0) {
-      return liveOptions.strikes;
-    }
-    return STRIKES;
-  }, [liveOptions]);
-
-  const quoteMap = useMemo(() => {
-    const map = new Map<string, Quote>();
-    if (liveOptions && liveOptions.quotes.length > 0) {
-      for (const q of liveOptions.quotes) {
-        map.set(`${q.strike}_${q.type}`, {
-          type: q.type,
-          strike: q.strike,
-          bid: q.bid,
-          ask: q.ask,
-          last: q.last,
-          mark: q.mark,
-          iv: q.iv,
-          delta: q.delta,
-          gamma: q.gamma,
-          theta: q.theta,
-          vega: q.vega,
-          volume: q.volume,
-          oi: q.oi,
-        });
-      }
-    }
-    return map;
-  }, [liveOptions]);
-
+  const expiries = dataMode === "demo" ? EXPIRIES : expiryChoices;
+  const strikes = dataMode === "demo" ? STRIKES : (liveOptions?.strikes ?? []);
+  const quoteMap = useMemo(
+    () =>
+      new Map(
+        (liveOptions?.quotes ?? []).map((quote) => [
+          `${quote.strike}_${quote.type}`,
+          quote,
+        ]),
+      ),
+    [liveOptions],
+  );
   const getQuote = useCallback(
-    (exp: Expiry, strike: number, type: OptionType): Quote => {
-      const live = quoteMap.get(`${strike}_${type}`);
-      if (live) return live;
-      return quoteFor(exp, strike, type);
+    (exp: Expiry | undefined, strike: number, type: OptionType): Quote => {
+      if (dataMode === "demo" && exp) return quoteFor(exp, strike, type);
+      const observed =
+        exp?.id === liveOptions?.currentExpiry
+          ? quoteMap.get(`${strike}_${type}`)
+          : undefined;
+      return (
+        observed ?? {
+          type,
+          strike,
+          bid: null,
+          ask: null,
+          last: null,
+          mark: null,
+          iv: null,
+          delta: null,
+          gamma: null,
+          theta: null,
+          vega: null,
+          volume: null,
+          oi: null,
+          lastTradeAt: null,
+        }
+      );
     },
-    [quoteMap],
+    [dataMode, liveOptions, quoteMap],
   );
 
-  const expiry = expiries.find((item) => item.id === expiryId) ?? expiries[0] ?? EXPIRIES[0];
+  const expiry = expiries.find((item) => item.id === expiryId) ??
+    expiries[0] ?? {
+      id: "",
+      label: "Unavailable",
+      underlying: underlyingSymbol,
+      reference: underlyingSymbol,
+      future: NaN,
+      days: 0,
+    };
 
   useEffect(() => {
-    if (!isAutoRotating || isDragging) return;
+    if (!isAutoRotating || isDragging || view !== "surface") return;
     let animId: number;
     const tick = () => {
       setRotation((prev) => {
@@ -272,7 +306,7 @@ export default function OptionsLab({
     };
     animId = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(animId);
-  }, [isAutoRotating, isDragging]);
+  }, [isAutoRotating, isDragging, view]);
 
   useEffect(() => {
     return () => {
@@ -282,14 +316,11 @@ export default function OptionsLab({
     };
   }, []);
 
-  useEffect(() => {
-    setExpiryId(expiries[instrument === "brent-feb27" ? 1 : 0]?.id ?? expiries[0]?.id);
-    setSelected({ strike: strikes[0] || 84, type: "call" });
-  }, [instrument, expiries, strikes]);
-
   const selectedQuote = getQuote(expiry, selected.strike, selected.type);
   const shownStrikes = strikes.filter(
-    (strike) => strikeFilter === "all" || Math.abs(strike - expiry.future) <= Math.max(4, expiry.future * 0.15),
+    (strike) =>
+      strikeFilter === "all" ||
+      Math.abs(strike - expiry.future) <= Math.max(4, expiry.future * 0.15),
   );
   const showCalls = typeFilter !== "put";
   const showPuts = typeFilter !== "call";
@@ -329,21 +360,36 @@ export default function OptionsLab({
       legs.some((leg) => Math.abs(leg.quantity) !== futureQuantity))
   ) {
     strategyError =
-      "This long-futures collar needs one long put, one short call and equal positive futures exposure.";
+      dataMode === "demo"
+        ? "This long-futures collar needs one long put, one short call and equal positive futures exposure."
+        : "This fund collar needs one long put, one short call and equal positive underlying exposure.";
   } else if (legValues.some((leg) => leg.quote.mark === null)) {
     strategyError =
       "A selected leg has no valid midpoint because its bid is missing. Choose another strike.";
   }
   const premium = legValues.reduce(
-    (total, leg) => total + leg.quantity * (leg.quote.mark ?? 0),
+    (total, leg) =>
+      leg.quote.mark === null ? NaN : total + leg.quantity * leg.quote.mark,
     0,
   );
   const greeks = legValues.reduce(
     (total, leg) => ({
-      delta: total.delta + leg.quantity * leg.quote.delta,
-      gamma: total.gamma + leg.quantity * leg.quote.gamma,
-      theta: total.theta + leg.quantity * leg.quote.theta,
-      vega: total.vega + leg.quantity * leg.quote.vega,
+      delta:
+        leg.quote.delta === null
+          ? NaN
+          : total.delta + leg.quantity * leg.quote.delta,
+      gamma:
+        leg.quote.gamma === null
+          ? NaN
+          : total.gamma + leg.quantity * leg.quote.gamma,
+      theta:
+        leg.quote.theta === null
+          ? NaN
+          : total.theta + leg.quantity * leg.quote.theta,
+      vega:
+        leg.quote.vega === null
+          ? NaN
+          : total.vega + leg.quantity * leg.quote.vega,
     }),
     {
       delta: template === "collar" ? futureQuantity : 0,
@@ -369,7 +415,7 @@ export default function OptionsLab({
           id: `${expiryIndex}-${strikeIndex}`,
           expiry: item,
           strike,
-          iv: getQuote(item, strike, "call").iv,
+          iv: getQuote(item, strike, "call").iv ?? NaN,
         })),
       ),
     [expiries, surfaceStrikes, getQuote],
@@ -412,12 +458,24 @@ export default function OptionsLab({
     const activeExpiries = expiries.slice(0, 3);
     const d0 = activeExpiries[0]?.days ?? 37;
     const d1 = activeExpiries[activeExpiries.length - 1]?.days ?? 65;
-    const daySteps = [d0, d0 + (d1 - d0) * 0.25, d0 + (d1 - d0) * 0.5, d0 + (d1 - d0) * 0.75, d1];
+    const daySteps = [
+      d0,
+      d0 + (d1 - d0) * 0.25,
+      d0 + (d1 - d0) * 0.5,
+      d0 + (d1 - d0) * 0.75,
+      d1,
+    ];
     const grid = daySteps.map((d) => {
       const t = d1 === d0 ? 0 : (d - d0) / (d1 - d0);
       return surfaceStrikes.map((strike) => {
-        const iv0 = getQuote(activeExpiries[0] || expiries[0], strike, "call").iv;
-        const iv1 = getQuote(activeExpiries[activeExpiries.length - 1] || expiries[0], strike, "call").iv;
+        const iv0 =
+          getQuote(activeExpiries[0] || expiries[0], strike, "call").iv ?? NaN;
+        const iv1 =
+          getQuote(
+            activeExpiries[activeExpiries.length - 1] || expiries[0],
+            strike,
+            "call",
+          ).iv ?? NaN;
         return {
           strike,
           days: d,
@@ -448,7 +506,12 @@ export default function OptionsLab({
   function makeRule(type: OptionType, strike: number) {
     const quote = getQuote(expiry, strike, type);
     const value = quote[priceField];
-    if (value === null) return;
+    if (
+      value === null ||
+      !Number.isFinite(value) ||
+      (dataMode === "yahoo" && (isOptionsLoading || !liveOptions))
+    )
+      return;
     onCreateRule({
       name: `${expiry.reference} ${expiry.label} ${strike} ${type} · ${priceField}`,
       instrument: expiry.underlying,
@@ -458,8 +521,9 @@ export default function OptionsLab({
         {
           id: `option-${expiry.id}-${strike}-${type}`,
           metric: "option_premium",
+          unit,
           operator: "crosses_above",
-          threshold: Number(value.toFixed(3)),
+          threshold: value,
           period: 20,
           slowPeriod: 50,
           windowBars: 1,
@@ -479,7 +543,33 @@ export default function OptionsLab({
   }
   function chooseTemplate(next: Template) {
     setTemplate(next);
-    setLegs(templateLegs(next));
+    if (dataMode === "demo") setLegs(templateLegs(next));
+    else {
+      const index = strikes.reduce(
+        (best, strike, i) =>
+          Math.abs(strike - expiry.future) <
+          Math.abs(strikes[best] - expiry.future)
+            ? i
+            : best,
+        0,
+      );
+      const atm = strikes[index];
+      const lower = strikes[Math.max(0, index - 1)];
+      const upper = strikes[Math.min(strikes.length - 1, index + 1)];
+      setLegs(
+        next === "vanilla"
+          ? [{ id: 1, type: "call", strike: atm, quantity: 1 }]
+          : next === "put-spread"
+            ? [
+                { id: 1, type: "put", strike: atm, quantity: 1 },
+                { id: 2, type: "put", strike: lower, quantity: -1 },
+              ]
+            : [
+                { id: 1, type: "put", strike: lower, quantity: 1 },
+                { id: 2, type: "call", strike: upper, quantity: -1 },
+              ],
+      );
+    }
     setFutureQuantity(1);
   }
   function renderQuoteCells(type: OptionType, strike: number) {
@@ -542,10 +632,10 @@ export default function OptionsLab({
         <div className="panel-heading options-panel-heading">
           <div>
             <div className="eyebrow">Options lab</div>
-            <h2 id="options-title">Options ladder & volatility</h2>
+            <h2 id="options-title">Explore options</h2>
             <p className="muted options-subtitle">
-              Inspect premiums, build signed exposures and explore the
-              volatility smile.
+              Start with premiums. Open the strategy builder or volatility
+              surface when needed.
             </p>
           </div>
           <div className="options-view-switch" aria-label="Options view">
@@ -555,6 +645,13 @@ export default function OptionsLab({
               onClick={() => setView("chain")}
             >
               <Layers3 size={15} /> Options ladder
+            </button>
+            <button
+              type="button"
+              aria-pressed={view === "strategy"}
+              onClick={() => setView("strategy")}
+            >
+              <Layers3 size={15} /> Build strategy
             </button>
             <button
               type="button"
@@ -569,25 +666,40 @@ export default function OptionsLab({
           <label>
             Oil underlying
             <select
-              value={underlyingSymbol}
-              onChange={(e) => setUnderlyingSymbol(e.target.value as "BNO" | "USO")}
+              value={dataMode === "demo" ? "BNO" : underlyingSymbol}
+              disabled={dataMode === "demo"}
+              onChange={(e) => {
+                setUnderlyingSymbol(e.target.value as "BNO" | "USO");
+                setRequestedExpiry(null);
+                setExpiryChoices([]);
+                setExpiryId("");
+              }}
             >
-              <option value="BNO">BNO · Brent Crude Oil Fund (Live)</option>
-              <option value="USO">USO · WTI Crude Oil Fund (Live)</option>
+              <option value="BNO">
+                {dataMode === "demo"
+                  ? "Demo Brent futures fixtures"
+                  : "BNO · Brent oil fund"}
+              </option>
+              <option value="USO">USO · WTI oil fund</option>
             </select>
           </label>
           <label>
             Option expiry
             <select
               value={expiryId}
+              disabled={!expiries.length}
               onChange={(event) => {
                 setExpiryId(event.target.value);
-                setSelected({ strike: strikes[0] || 84, type: "call" });
+                if (dataMode === "yahoo") {
+                  setLiveOptions(null);
+                  setIsOptionsLoading(true);
+                  setRequestedExpiry(event.target.value);
+                } else setSelected({ strike: STRIKES[0], type: "call" });
               }}
             >
               {expiries.map((item) => (
                 <option key={item.id} value={item.id}>
-                  {item.label} · {item.days} days
+                  {item.label} · {Math.ceil(item.days)} days
                 </option>
               ))}
             </select>
@@ -595,32 +707,130 @@ export default function OptionsLab({
           <div className="options-reference">
             <span>Underlying market reference</span>
             <strong>
-              {liveOptions ? liveOptions.underlying : expiry.reference}{" "}
+              {liveOptions
+                ? liveOptions.underlying
+                : dataMode === "demo"
+                  ? expiry.reference
+                  : underlyingSymbol}{" "}
               <span className="opt-number">
-                ${(liveOptions ? liveOptions.underlyingPrice : expiry.future).toFixed(2)}
+                {liveOptions
+                  ? `$${liveOptions.underlyingPrice.toFixed(2)}`
+                  : dataMode === "demo"
+                    ? `$${expiry.future.toFixed(2)}`
+                    : "—"}
               </span>
             </strong>
-            <small>USD · Live Yahoo Finance</small>
+            <small>
+              {liveOptions
+                ? "USD · Yahoo Finance snapshot"
+                : dataMode === "demo"
+                  ? "USD/bbl · Synthetic fixture"
+                  : "Price unavailable"}
+            </small>
           </div>
           <div className="options-snapshot">
             <span
               className="badge"
               style={{
                 background: "rgba(10,140,115,0.12)",
-                color: "#087d68",
+                color: "var(--ink)",
                 display: "inline-flex",
                 alignItems: "center",
                 gap: "6px",
               }}
             >
-              <span className="dot green" />
-              {isOptionsLoading ? "Fetching..." : "Live Options Chain"}
+              <span className={`dot ${liveOptions ? "green" : "gray"}`} />
+              {isOptionsLoading
+                ? "Fetching…"
+                : liveOptions
+                  ? "Yahoo Finance snapshot"
+                  : dataMode === "demo"
+                    ? "Synthetic options"
+                    : "Options unavailable"}
             </span>
-            <span>{liveOptions?.snapshot || SNAPSHOT}</span>
+            <button
+              className="text-button"
+              type="button"
+              disabled={dataMode === "demo" || isOptionsLoading}
+              onClick={() => setRetry((value) => value + 1)}
+            >
+              Refresh options snapshot
+            </button>
+            <span>
+              {dataMode === "demo"
+                ? SNAPSHOT
+                : liveOptions?.meta.fetchedAt
+                  ? `${timestamp(Date.parse(liveOptions.meta.fetchedAt))} UTC`
+                  : "No snapshot"}
+            </span>
           </div>
         </div>
 
-        {view === "chain" ? (
+        <DataSourceNotice
+          mode={dataMode}
+          meta={liveOptions?.meta}
+          loading={isOptionsLoading}
+          label="Options"
+        />
+        {dataMode === "yahoo" && (
+          <p className="hint options-task-hint">
+            Oil fund options · USD/share · not ICE Brent futures options.
+            Bid/ask times are not supplied. Greeks are unavailable without a
+            verified model.
+          </p>
+        )}
+        {dataMode === "yahoo" && (!liveOptions || isOptionsLoading) ? (
+          <Empty
+            title={
+              isOptionsLoading
+                ? "Loading option snapshot"
+                : "Options data unavailable"
+            }
+          >
+            {isOptionsLoading
+              ? "Fetching the selected fund and expiry."
+              : `${optionsError || "No observed chain returned."} Retry or explicitly choose Demo samples.`}
+            <button
+              className="btn btn-outline"
+              disabled={isOptionsLoading}
+              onClick={() => setRetry((value) => value + 1)}
+            >
+              Retry options data
+            </button>
+          </Empty>
+        ) : view === "surface" && dataMode === "yahoo" ? (
+          <div className="observed-iv-view">
+            <h3>Selected expiry IV · {expiry.label}</h3>
+            <p className="notice">
+              A term surface needs separate snapshots for multiple expiries. No
+              synthetic surface is drawn for Yahoo data.
+            </p>
+            <div className="table-wrap">
+              <table>
+                <caption>
+                  Observed option IV for {expiry.label}; unavailable values
+                  remain blank.
+                </caption>
+                <thead>
+                  <tr>
+                    <th>Strike · USD/share</th>
+                    <th>Call IV (%)</th>
+                    <th>Put IV (%)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {strikes.map((strike) => (
+                    <tr key={strike}>
+                      <td>{number(strike)}</td>
+                      <td>{number(getQuote(expiry, strike, "call").iv, 1)}</td>
+                      <td>{number(getQuote(expiry, strike, "put").iv, 1)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ) : view === "chain" ? (
           <>
             <div className="options-chain-controls">
               <div className="options-inline-fields">
@@ -657,8 +867,11 @@ export default function OptionsLab({
                     value={strikeFilter}
                     onChange={(event) => setStrikeFilter(event.target.value)}
                   >
-                    <option value="all">All 8 strikes</option>
-                    <option value="near">Within $4 of reference</option>
+                    <option value="all">All {strikes.length} strikes</option>
+                    <option value="near">
+                      Near reference (±
+                      {Math.max(4, expiry.future * 0.15).toFixed(2)})
+                    </option>
                   </select>
                 </label>
                 <button
@@ -669,11 +882,13 @@ export default function OptionsLab({
                   aria-pressed={showGreeks}
                 >
                   <Sliders size={13} />
-                  <span>{showGreeks ? "Hide Greeks (Δ, IV)" : "Show Greeks (Δ, IV)"}</span>
+                  <span>
+                    {showGreeks ? "Hide Greeks (Δ, IV)" : "Show Greeks (Δ, IV)"}
+                  </span>
                 </button>
               </div>
               <span className="options-table-count">
-                {shownStrikes.length} strikes · USD/bbl
+                {shownStrikes.length} strikes · {unit}
               </span>
             </div>
             <div
@@ -683,9 +898,10 @@ export default function OptionsLab({
             >
               <table className="options-chain">
                 <caption className="opt-sr-only">
-                  Synthetic options chain for {expiry.label}, underlying{" "}
-                  {expiry.reference}. Mark is midpoint when both quote sides are
-                  available. Rule actions use the chosen {priceField} field.
+                  {liveOptions ? "Yahoo Finance" : "Synthetic"} options chain
+                  for {expiry.label}, underlying {expiry.reference}. Mark is
+                  midpoint when both quote sides are available. Rule actions use
+                  the chosen {priceField} field.
                 </caption>
                 <thead>
                   <tr className="option-side-heading">
@@ -723,7 +939,7 @@ export default function OptionsLab({
                       </>
                     )}
                     <th className="strike-column" scope="col">
-                      USD/bbl
+                      {unit}
                     </th>
                     {showPuts && (
                       <>
@@ -786,42 +1002,59 @@ export default function OptionsLab({
                 <div>
                   <dt>Bid–ask spread</dt>
                   <dd>
-                    {selectedQuote.bid === null
+                    {selectedQuote.bid === null ||
+                    selectedQuote.ask === null ||
+                    selectedQuote.ask < selectedQuote.bid
                       ? "Unavailable"
                       : number(selectedQuote.ask - selectedQuote.bid)}
                   </dd>
                 </div>
-                <div>
-                  <dt>Gamma / $1</dt>
-                  <dd>{number(selectedQuote.gamma, 3)}</dd>
-                </div>
-                <div>
-                  <dt>Theta / day</dt>
-                  <dd>{signed(selectedQuote.theta, 3)}</dd>
-                </div>
-                <div>
-                  <dt>Vega / vol pt</dt>
-                  <dd>{number(selectedQuote.vega, 3)}</dd>
-                </div>
+                {showGreeks && (
+                  <>
+                    <div>
+                      <dt>Gamma / $1</dt>
+                      <dd>{number(selectedQuote.gamma, 3)}</dd>
+                    </div>
+                    <div>
+                      <dt>Theta / day</dt>
+                      <dd>{signed(selectedQuote.theta, 3)}</dd>
+                    </div>
+                    <div>
+                      <dt>Vega / vol pt</dt>
+                      <dd>{number(selectedQuote.vega, 3)}</dd>
+                    </div>
+                  </>
+                )}
                 <div>
                   <dt>Volume / OI</dt>
                   <dd>
-                    {selectedQuote.volume.toLocaleString("en-GB")} /{" "}
-                    {selectedQuote.oi.toLocaleString("en-GB")}
+                    {selectedQuote.volume?.toLocaleString("en-GB") ?? "—"} /{" "}
+                    {selectedQuote.oi?.toLocaleString("en-GB") ?? "—"}
                   </dd>
                 </div>
               </dl>
             </div>
+            {dataMode === "yahoo" && (
+              <p className="hint options-task-hint">
+                Last trade:{" "}
+                {selectedQuote.lastTradeAt
+                  ? `${timestamp(Date.parse(selectedQuote.lastTradeAt))} UTC`
+                  : "Not supplied"}
+                . This is not the bid/ask observation time.
+              </p>
+            )}
             <div className="options-note">
               <CircleHelp size={15} />
               <p>
-                Prices and Greeks are supplied illustrative fixtures. Mark =
-                (bid + ask) / 2. The 90 put has no bid or last, so its midpoint
-                and last-price rule are unavailable. No silent price fallback.
+                {liveOptions
+                  ? "Yahoo Finance option snapshot. Greeks unavailable: no verified pricing model configured."
+                  : "Prices and Greeks are supplied illustrative fixtures."}{" "}
+                Mark = (bid + ask) / 2. Missing prices disable rules for that
+                field. No silent price fallback.
               </p>
             </div>
           </>
-        ) : (
+        ) : view === "surface" ? (
           <>
             <div className="surface-toolbar">
               <div>
@@ -1089,7 +1322,11 @@ export default function OptionsLab({
                         />
                       );
                     })}
-                    {[minDays, Math.round(minDays + (maxDays - minDays) * 0.5), maxDays].map((days) => {
+                    {[
+                      minDays,
+                      Math.round(minDays + (maxDays - minDays) * 0.5),
+                      maxDays,
+                    ].map((days) => {
                       const a = project(minStrike, days, 23.5);
                       const b = project(maxStrike, days, 23.5);
                       return (
@@ -1104,20 +1341,22 @@ export default function OptionsLab({
                         />
                       );
                     })}
-                    {surfaceStrikes.filter((_, i) => i % 2 === 0).map((strike) => {
-                      const pt = project(strike, minDays, 23.5);
-                      return (
-                        <text
-                          key={`lbl-${strike}`}
-                          x={pt.x}
-                          y={pt.y + 11}
-                          className="surface-floor-tick"
-                          textAnchor="middle"
-                        >
-                          ${strike}
-                        </text>
-                      );
-                    })}
+                    {surfaceStrikes
+                      .filter((_, i) => i % 2 === 0)
+                      .map((strike) => {
+                        const pt = project(strike, minDays, 23.5);
+                        return (
+                          <text
+                            key={`lbl-${strike}`}
+                            x={pt.x}
+                            y={pt.y + 11}
+                            className="surface-floor-tick"
+                            textAnchor="middle"
+                          >
+                            ${strike}
+                          </text>
+                        );
+                      })}
                   </g>
 
                   {/* Shaded 3D Surface Mesh */}
@@ -1160,25 +1399,29 @@ export default function OptionsLab({
                     })}
 
                   {/* Primary Expiry Splines */}
-                  {expiries.filter(
-                    (item) =>
-                      surfaceExpiry === "all" || item.id === surfaceExpiry,
-                  ).map((item) => (
-                    <polyline
-                      key={item.id}
-                      points={surfaceStrikes.map((strike) => {
-                        const point = project(
-                          strike,
-                          item.days,
-                          getQuote(item, strike, "call").iv,
-                        );
-                        return `${point.x.toFixed(1)},${point.y.toFixed(1)}`;
-                      }).join(" ")}
-                      fill="none"
-                      stroke="var(--primary)"
-                      strokeWidth="2"
-                    />
-                  ))}
+                  {expiries
+                    .filter(
+                      (item) =>
+                        surfaceExpiry === "all" || item.id === surfaceExpiry,
+                    )
+                    .map((item) => (
+                      <polyline
+                        key={item.id}
+                        points={surfaceStrikes
+                          .map((strike) => {
+                            const point = project(
+                              strike,
+                              item.days,
+                              getQuote(item, strike, "call").iv ?? NaN,
+                            );
+                            return `${point.x.toFixed(1)},${point.y.toFixed(1)}`;
+                          })
+                          .join(" ")}
+                        fill="none"
+                        stroke="var(--primary)"
+                        strokeWidth="2"
+                      />
+                    ))}
 
                   {/* Projection Drop Line & Floor Shadow for Active Point */}
                   {(() => {
@@ -1479,333 +1722,397 @@ export default function OptionsLab({
               </p>
             </div>
           </>
+        ) : (
+          <p className="hint options-task-hint">
+            Choose a position template below, then adjust its legs. Switching
+            views keeps your edits.
+          </p>
         )}
       </section>
 
-      <section
-        className="panel strategy-panel"
-        aria-labelledby="strategy-title"
-      >
-        <div className="panel-heading">
-          <div>
-            <div className="eyebrow">Position workshop</div>
-            <h2 id="strategy-title">Strategy builder</h2>
-          </div>
-          <span className="badge">Illustrative valuation</span>
-        </div>
-        <div className="strategy-template-bar">
-          <div className="strategy-templates" aria-label="Strategy template">
-            {(
-              [
-                ["vanilla", "Vanilla option"],
-                ["put-spread", "Put spread"],
-                ["collar", "Long-futures collar"],
-              ] as const
-            ).map(([value, label]) => (
-              <button
-                key={value}
-                type="button"
-                aria-pressed={template === value}
-                onClick={() => chooseTemplate(value)}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-          <span className="muted">Changing template resets the legs.</span>
-        </div>
-        <div className="strategy-content">
-          <div className="strategy-legs">
-            <div className="strategy-context">
-              {expiry.label} <span>·</span> {expiry.reference} <span>·</span>{" "}
-              midpoint marks in USD/bbl
+      {view === "strategy" &&
+        (dataMode === "demo" || (!!liveOptions && !isOptionsLoading)) && (
+          <section
+            className="panel strategy-panel"
+            aria-labelledby="strategy-title"
+          >
+            <div className="panel-heading">
+              <div>
+                <div className="eyebrow">Position workshop</div>
+                <h2 id="strategy-title">Strategy builder</h2>
+              </div>
+              <span className="badge">Illustrative valuation</span>
             </div>
-            {template === "collar" && (
-              <div className="underlying-leg">
-                <Layers3 size={17} />
-                <div>
-                  <strong>Long underlying futures</strong>
+            <div className="strategy-template-bar">
+              <div
+                className="strategy-templates"
+                aria-label="Strategy template"
+              >
+                {(
+                  [
+                    ["vanilla", "Vanilla option"],
+                    ["put-spread", "Put spread"],
+                    [
+                      "collar",
+                      dataMode === "demo"
+                        ? "Long-futures collar"
+                        : "Long-fund collar",
+                    ],
+                  ] as const
+                ).map(([value, label]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    aria-pressed={template === value}
+                    onClick={() => chooseTemplate(value)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <span className="muted">Changing template resets the legs.</span>
+            </div>
+            <div className="strategy-content">
+              <div className="strategy-legs">
+                <div className="strategy-context">
+                  {expiry.label} <span>·</span> {expiry.reference}{" "}
+                  <span>·</span> midpoint marks in {unit}
+                </div>
+                {template === "collar" && (
+                  <div className="underlying-leg">
+                    <Layers3 size={17} />
+                    <div>
+                      <strong>
+                        {dataMode === "demo"
+                          ? "Long underlying futures"
+                          : "Long underlying fund"}
+                      </strong>
+                      <span>
+                        {expiry.reference} · reference $
+                        {expiry.future.toFixed(2)}
+                        /bbl
+                      </span>
+                    </div>
+                    <label>
+                      {dataMode === "demo"
+                        ? "Futures units"
+                        : "Underlying units"}
+                      <input
+                        type="number"
+                        min="1"
+                        max="100"
+                        step="1"
+                        value={futureQuantity || ""}
+                        onChange={(event) =>
+                          setFutureQuantity(Number(event.target.value))
+                        }
+                        aria-invalid={!!strategyError}
+                        aria-describedby={
+                          strategyError ? "strategy-error" : undefined
+                        }
+                      />
+                    </label>
+                  </div>
+                )}
+                {legs.map((leg, index) => (
+                  <div className="strategy-leg" key={leg.id}>
+                    <label
+                      className={`leg-side-label ${leg.quantity < 0 ? "short" : "long"}`}
+                    >
+                      Position
+                      <select
+                        aria-label={`Leg ${index + 1} position`}
+                        value={leg.quantity < 0 ? "short" : "long"}
+                        onChange={(event) =>
+                          updateLeg(leg.id, {
+                            quantity:
+                              (event.target.value === "short" ? -1 : 1) *
+                              Math.abs(leg.quantity || 1),
+                          })
+                        }
+                      >
+                        <option value="long">Long</option>
+                        <option value="short">Short</option>
+                      </select>
+                    </label>
+                    <label>
+                      Leg {index + 1} type
+                      <select
+                        value={leg.type}
+                        onChange={(event) =>
+                          updateLeg(leg.id, {
+                            type: event.target.value as OptionType,
+                          })
+                        }
+                      >
+                        <option value="call">Call</option>
+                        <option value="put">Put</option>
+                      </select>
+                    </label>
+                    <label>
+                      Strike
+                      <select
+                        value={leg.strike}
+                        onChange={(event) =>
+                          updateLeg(leg.id, {
+                            strike: Number(event.target.value),
+                          })
+                        }
+                      >
+                        {!strikes.includes(leg.strike) && (
+                          <option value={leg.strike}>
+                            {leg.strike.toFixed(2)} · unavailable
+                          </option>
+                        )}
+                        {strikes.map((strike) => (
+                          <option key={strike} value={strike}>
+                            {strike.toFixed(2)}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      Quantity
+                      <input
+                        type="number"
+                        min="1"
+                        max="100"
+                        step="1"
+                        value={Math.abs(leg.quantity) || ""}
+                        onChange={(event) =>
+                          updateLeg(leg.id, {
+                            quantity:
+                              Number(event.target.value) *
+                              (leg.quantity < 0 ? -1 : 1),
+                          })
+                        }
+                        aria-invalid={!!strategyError}
+                        aria-describedby={
+                          strategyError ? "strategy-error" : undefined
+                        }
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      className="icon-button remove-leg"
+                      aria-label={`Remove leg ${index + 1}`}
+                      title={`Remove leg ${index + 1}`}
+                      disabled={legs.length === 1}
+                      onClick={() =>
+                        setLegs((current) =>
+                          current.filter((item) => item.id !== leg.id),
+                        )
+                      }
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
+                ))}
+                <div className="strategy-leg-actions">
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    disabled={legs.length >= 4}
+                    onClick={() =>
+                      setLegs((current) => [
+                        ...current,
+                        {
+                          id: Math.max(...current.map((leg) => leg.id)) + 1,
+                          type: "call",
+                          strike: dataMode === "demo" ? 86 : strikes[0],
+                          quantity: 1,
+                        },
+                      ])
+                    }
+                  >
+                    <Plus size={14} /> Add option leg
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    onClick={() => chooseTemplate(template)}
+                  >
+                    <RotateCcw size={13} /> Reset template
+                  </button>
+                </div>
+                {strategyError && (
+                  <p
+                    className="strategy-error"
+                    id="strategy-error"
+                    role="status"
+                  >
+                    {strategyError}
+                  </p>
+                )}
+                <div className="strategy-formula">
+                  <span className="eyebrow">Option premium formula</span>
+                  <code>
+                    {legValues
+                      .map(
+                        (leg, index) =>
+                          `${index === 0 ? "" : leg.quantity >= 0 ? " + " : " − "}${index === 0 && leg.quantity < 0 ? "−" : ""}${Math.abs(leg.quantity)} × ${number(leg.quote.mark)}`,
+                      )
+                      .join("")}{" "}
+                    {unit}
+                  </code>
                   <span>
-                    {expiry.reference} · reference ${expiry.future.toFixed(2)}
-                    /bbl
+                    Signed quantity × midpoint, summed across option legs.
                   </span>
                 </div>
-                <label>
-                  Futures units
-                  <input
-                    type="number"
-                    min="1"
-                    max="100"
-                    step="1"
-                    value={futureQuantity || ""}
-                    onChange={(event) =>
-                      setFutureQuantity(Number(event.target.value))
-                    }
-                    aria-invalid={!!strategyError}
-                    aria-describedby={
-                      strategyError ? "strategy-error" : undefined
-                    }
-                  />
-                </label>
               </div>
-            )}
-            {legs.map((leg, index) => (
-              <div className="strategy-leg" key={leg.id}>
-                <label
-                  className={`leg-side-label ${leg.quantity < 0 ? "short" : "long"}`}
+              <aside className="strategy-valuation">
+                <span className="eyebrow">Option-only signed premium</span>
+                <div className="strategy-premium">
+                  {strategyError ? "—" : signed(premium)}
+                  <span>{unit}</span>
+                </div>
+                <span
+                  className={`premium-direction ${premium >= 0 ? "debit" : "credit"}`}
                 >
-                  Position
-                  <select
-                    aria-label={`Leg ${index + 1} position`}
-                    value={leg.quantity < 0 ? "short" : "long"}
-                    onChange={(event) =>
-                      updateLeg(leg.id, {
-                        quantity:
-                          (event.target.value === "short" ? -1 : 1) *
-                          Math.abs(leg.quantity || 1),
-                      })
-                    }
-                  >
-                    <option value="long">Long</option>
-                    <option value="short">Short</option>
-                  </select>
-                </label>
-                <label>
-                  Leg {index + 1} type
-                  <select
-                    value={leg.type}
-                    onChange={(event) =>
-                      updateLeg(leg.id, {
-                        type: event.target.value as OptionType,
-                      })
-                    }
-                  >
-                    <option value="call">Call</option>
-                    <option value="put">Put</option>
-                  </select>
-                </label>
-                <label>
-                  Strike
-                  <select
-                    value={leg.strike}
-                    onChange={(event) =>
-                      updateLeg(leg.id, { strike: Number(event.target.value) })
-                    }
-                  >
-                    {strikes.map((strike) => (
-                      <option key={strike} value={strike}>
-                        {strike.toFixed(2)}
-                      </option>
+                  {strategyError
+                    ? "Valuation unavailable"
+                    : premium > 0
+                      ? "Debit to establish"
+                      : premium < 0
+                        ? "Credit to establish"
+                        : "Flat option premium"}
+                </span>
+                <dl className="strategy-net-greeks">
+                  <div>
+                    <dt>Net delta</dt>
+                    <dd>{strategyError ? "—" : signed(greeks.delta, 3)}</dd>
+                  </div>
+                  <div>
+                    <dt>Net gamma / $1</dt>
+                    <dd>{strategyError ? "—" : signed(greeks.gamma, 3)}</dd>
+                  </div>
+                  <div>
+                    <dt>Net theta / day</dt>
+                    <dd>{strategyError ? "—" : signed(greeks.theta, 3)}</dd>
+                  </div>
+                  <div>
+                    <dt>Net vega / vol pt</dt>
+                    <dd>{strategyError ? "—" : signed(greeks.vega, 3)}</dd>
+                  </div>
+                </dl>
+                <p>
+                  Per compatible unit.{" "}
+                  {template === "collar"
+                    ? dataMode === "demo"
+                      ? "Net delta includes the long futures exposure; premium includes options only."
+                      : "Net delta includes the underlying fund exposure; premium includes options only."
+                    : "Positive quantity is long; negative quantity is short."}{" "}
+                  Cash premium is unavailable until the contract multiplier is
+                  verified.
+                </p>
+              </aside>
+            </div>
+            <details className="strategy-breakdown" open>
+              <summary>Signed leg-to-net reconciliation</summary>
+              <div
+                className="table-wrap"
+                tabIndex={0}
+                aria-label="Signed leg breakdown, scroll horizontally"
+              >
+                <table>
+                  <caption className="opt-sr-only">
+                    Each Greek is multiplied by the signed quantity. Gamma units
+                    are per USD/bbl, theta USD/bbl per calendar day, vega
+                    USD/bbl per one volatility point.
+                  </caption>
+                  <thead>
+                    <tr>
+                      <th scope="col">Leg · common expiry {expiry.label}</th>
+                      <th scope="col">Signed qty</th>
+                      <th scope="col">Premium</th>
+                      <th scope="col">Delta</th>
+                      <th scope="col">Gamma</th>
+                      <th scope="col">Theta / day</th>
+                      <th scope="col">Vega / vol pt</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {template === "collar" && (
+                      <tr>
+                        <td>{expiry.reference} futures</td>
+                        <td>{signed(futureQuantity, 0)}</td>
+                        <td>Excluded</td>
+                        <td>{signed(futureQuantity, 3)}</td>
+                        <td>0.000</td>
+                        <td>0.000</td>
+                        <td>0.000</td>
+                      </tr>
+                    )}
+                    {legValues.map((leg) => (
+                      <tr key={leg.id}>
+                        <td>
+                          {leg.strike.toFixed(2)} {leg.type}
+                        </td>
+                        <td>{signed(leg.quantity, 0)}</td>
+                        <td>
+                          {leg.quote.mark === null
+                            ? "Unavailable"
+                            : signed(leg.quantity * leg.quote.mark)}
+                        </td>
+                        <td>
+                          {signed(
+                            leg.quote.delta === null
+                              ? null
+                              : leg.quantity * leg.quote.delta,
+                            3,
+                          )}
+                        </td>
+                        <td>
+                          {signed(
+                            leg.quote.gamma === null
+                              ? null
+                              : leg.quantity * leg.quote.gamma,
+                            3,
+                          )}
+                        </td>
+                        <td>
+                          {signed(
+                            leg.quote.theta === null
+                              ? null
+                              : leg.quantity * leg.quote.theta,
+                            3,
+                          )}
+                        </td>
+                        <td>
+                          {signed(
+                            leg.quote.vega === null
+                              ? null
+                              : leg.quantity * leg.quote.vega,
+                            3,
+                          )}
+                        </td>
+                      </tr>
                     ))}
-                  </select>
-                </label>
-                <label>
-                  Quantity
-                  <input
-                    type="number"
-                    min="1"
-                    max="100"
-                    step="1"
-                    value={Math.abs(leg.quantity) || ""}
-                    onChange={(event) =>
-                      updateLeg(leg.id, {
-                        quantity:
-                          Number(event.target.value) *
-                          (leg.quantity < 0 ? -1 : 1),
-                      })
-                    }
-                    aria-invalid={!!strategyError}
-                    aria-describedby={
-                      strategyError ? "strategy-error" : undefined
-                    }
-                  />
-                </label>
-                <button
-                  type="button"
-                  className="icon-button remove-leg"
-                  aria-label={`Remove leg ${index + 1}`}
-                  title={`Remove leg ${index + 1}`}
-                  disabled={legs.length === 1}
-                  onClick={() =>
-                    setLegs((current) =>
-                      current.filter((item) => item.id !== leg.id),
-                    )
-                  }
-                >
-                  <Trash2 size={16} />
-                </button>
+                    <tr className="strategy-total">
+                      <th scope="row">Net position</th>
+                      <td>—</td>
+                      <td>{strategyError ? "Unavailable" : signed(premium)}</td>
+                      <td>{strategyError ? "—" : signed(greeks.delta, 3)}</td>
+                      <td>{strategyError ? "—" : signed(greeks.gamma, 3)}</td>
+                      <td>{strategyError ? "—" : signed(greeks.theta, 3)}</td>
+                      <td>{strategyError ? "—" : signed(greeks.vega, 3)}</td>
+                    </tr>
+                  </tbody>
+                </table>
               </div>
-            ))}
-            <div className="strategy-leg-actions">
-              <button
-                type="button"
-                className="btn btn-ghost"
-                disabled={legs.length >= 4}
-                onClick={() =>
-                  setLegs((current) => [
-                    ...current,
-                    {
-                      id: Math.max(...current.map((leg) => leg.id)) + 1,
-                      type: "call",
-                      strike: 86,
-                      quantity: 1,
-                    },
-                  ])
-                }
-              >
-                <Plus size={14} /> Add option leg
-              </button>
-              <button
-                type="button"
-                className="btn btn-ghost"
-                onClick={() => chooseTemplate(template)}
-              >
-                <RotateCcw size={13} /> Reset template
-              </button>
-            </div>
-            {strategyError && (
-              <p className="strategy-error" id="strategy-error" role="status">
-                {strategyError}
+            </details>
+            <div className="options-note options-replay-note">
+              <CircleHelp size={15} />
+              <p>
+                <strong>Historical options replay is unavailable.</strong> This
+                demo has no option-level history. Premium rules open as drafts;
+                futures bars cannot supply evidence for an option rule. Exercise
+                style, multiplier, model and exchange expiry conventions still
+                require verification.
               </p>
-            )}
-            <div className="strategy-formula">
-              <span className="eyebrow">Option premium formula</span>
-              <code>
-                {legValues
-                  .map(
-                    (leg, index) =>
-                      `${index === 0 ? "" : leg.quantity >= 0 ? " + " : " − "}${index === 0 && leg.quantity < 0 ? "−" : ""}${Math.abs(leg.quantity)} × ${number(leg.quote.mark)}`,
-                  )
-                  .join("")}{" "}
-                USD/bbl
-              </code>
-              <span>
-                Signed quantity × midpoint, summed across option legs.
-              </span>
             </div>
-          </div>
-          <aside className="strategy-valuation">
-            <span className="eyebrow">Option-only signed premium</span>
-            <div className="strategy-premium">
-              {strategyError ? "—" : signed(premium)}
-              <span>USD/bbl</span>
-            </div>
-            <span
-              className={`premium-direction ${premium >= 0 ? "debit" : "credit"}`}
-            >
-              {strategyError
-                ? "Valuation unavailable"
-                : premium > 0
-                  ? "Debit to establish"
-                  : premium < 0
-                    ? "Credit to establish"
-                    : "Flat option premium"}
-            </span>
-            <dl className="strategy-net-greeks">
-              <div>
-                <dt>Net delta</dt>
-                <dd>{strategyError ? "—" : signed(greeks.delta, 3)}</dd>
-              </div>
-              <div>
-                <dt>Net gamma / $1</dt>
-                <dd>{strategyError ? "—" : signed(greeks.gamma, 3)}</dd>
-              </div>
-              <div>
-                <dt>Net theta / day</dt>
-                <dd>{strategyError ? "—" : signed(greeks.theta, 3)}</dd>
-              </div>
-              <div>
-                <dt>Net vega / vol pt</dt>
-                <dd>{strategyError ? "—" : signed(greeks.vega, 3)}</dd>
-              </div>
-            </dl>
-            <p>
-              Per compatible unit.{" "}
-              {template === "collar"
-                ? "Net delta includes the long futures exposure; premium includes options only."
-                : "Positive quantity is long; negative quantity is short."}{" "}
-              Cash premium is unavailable until the contract multiplier is
-              verified.
-            </p>
-          </aside>
-        </div>
-        <details className="strategy-breakdown" open>
-          <summary>Signed leg-to-net reconciliation</summary>
-          <div
-            className="table-wrap"
-            tabIndex={0}
-            aria-label="Signed leg breakdown, scroll horizontally"
-          >
-            <table>
-              <caption className="opt-sr-only">
-                Each Greek is multiplied by the signed quantity. Gamma units are
-                per USD/bbl, theta USD/bbl per calendar day, vega USD/bbl per
-                one volatility point.
-              </caption>
-              <thead>
-                <tr>
-                  <th scope="col">Leg · common expiry {expiry.label}</th>
-                  <th scope="col">Signed qty</th>
-                  <th scope="col">Premium</th>
-                  <th scope="col">Delta</th>
-                  <th scope="col">Gamma</th>
-                  <th scope="col">Theta / day</th>
-                  <th scope="col">Vega / vol pt</th>
-                </tr>
-              </thead>
-              <tbody>
-                {template === "collar" && (
-                  <tr>
-                    <td>{expiry.reference} futures</td>
-                    <td>{signed(futureQuantity, 0)}</td>
-                    <td>Excluded</td>
-                    <td>{signed(futureQuantity, 3)}</td>
-                    <td>0.000</td>
-                    <td>0.000</td>
-                    <td>0.000</td>
-                  </tr>
-                )}
-                {legValues.map((leg) => (
-                  <tr key={leg.id}>
-                    <td>
-                      {leg.strike.toFixed(2)} {leg.type}
-                    </td>
-                    <td>{signed(leg.quantity, 0)}</td>
-                    <td>
-                      {leg.quote.mark === null
-                        ? "Unavailable"
-                        : signed(leg.quantity * leg.quote.mark)}
-                    </td>
-                    <td>{signed(leg.quantity * leg.quote.delta, 3)}</td>
-                    <td>{signed(leg.quantity * leg.quote.gamma, 3)}</td>
-                    <td>{signed(leg.quantity * leg.quote.theta, 3)}</td>
-                    <td>{signed(leg.quantity * leg.quote.vega, 3)}</td>
-                  </tr>
-                ))}
-                <tr className="strategy-total">
-                  <th scope="row">Net position</th>
-                  <td>—</td>
-                  <td>{strategyError ? "Unavailable" : signed(premium)}</td>
-                  <td>{strategyError ? "—" : signed(greeks.delta, 3)}</td>
-                  <td>{strategyError ? "—" : signed(greeks.gamma, 3)}</td>
-                  <td>{strategyError ? "—" : signed(greeks.theta, 3)}</td>
-                  <td>{strategyError ? "—" : signed(greeks.vega, 3)}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </details>
-        <div className="options-note options-replay-note">
-          <CircleHelp size={15} />
-          <p>
-            <strong>Historical options replay is unavailable.</strong> This demo
-            has no option-level history. Premium rules open as drafts; futures
-            bars cannot supply evidence for an option rule. Exercise style,
-            multiplier, model and exchange expiry conventions still require
-            verification.
-          </p>
-        </div>
-      </section>
+          </section>
+        )}
     </div>
   );
 }

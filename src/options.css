@@ -63,11 +63,15 @@
 }
 .options-view-switch {
   display: flex;
+  flex-wrap: wrap;
   flex-shrink: 0;
   padding: 3px;
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--canvas);
+}
+.options-task-hint {
+  padding: 0 24px 18px;
 }
 .options-view-switch button {
   display: flex;
@@ -94,6 +98,7 @@
 }
 .options-toolbar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 28px;
   margin: 0 22px;
@@ -102,9 +107,12 @@
 }
 .options-toolbar > label {
   width: 208px;
+  min-width: 160px;
+  flex: 1 1 160px;
 }
 .options-reference {
   display: grid;
+  min-width: 140px;
   gap: 4px;
 }
 .options-reference > span,

@@ -1,5 +1,15 @@
 import { test, expect } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
+
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() =>
+    localStorage.setItem("algo-triggers-market-source", "demo"),
+  );
+  await page.route("**/api/**", (route) =>
+    route.fulfill({ json: { success: false } }),
+  );
+});
+
 test("market workspace, curve, chart context and event evidence", async ({
   page,
 }) => {
@@ -17,18 +27,21 @@ test("market workspace, curve, chart context and event evidence", async ({
   ).toBeVisible();
   await page.getByRole("button", { name: "Price chart", exact: true }).click();
   await page.getByRole("button", { name: "15m", exact: true }).click();
+  await page.getByText("Indicator settings ·", { exact: false }).click();
   await page.getByLabel("Fast average period").fill("9");
   await page.getByLabel("Slow average period").fill("21");
   await page.getByRole("button", { name: "Create average rule" }).click();
   await expect(page.getByRole("dialog")).toBeVisible();
   await expect(page.getByLabel("Fast period 1")).toHaveValue("9");
-  await page.getByText("Evaluation & alert behavior").click();
-  await expect(page.getByLabel("Saved calculation timeframe")).toHaveValue(
-    "15m",
-  );
+  await page.getByText("Advanced settings").click();
+  await expect(page.getByLabel("Calculation timeframe")).toHaveValue("15m");
   await page.getByRole("button", { name: "Cancel", exact: true }).click();
 
   await page.locator(".event-item").first().click();
+  await expect(page.getByRole("dialog")).toContainText(
+    "Why this alert happened",
+  );
+  await page.getByText("View condition values", { exact: true }).click();
   await expect(page.getByRole("dialog")).toContainText("Condition diagnostics");
   await expect(errors).toEqual([]);
 });
@@ -38,21 +51,23 @@ test("create, invalid fields, replay, edit immutable version and persist", async
   await page.goto("/");
   await page.getByRole("button", { name: "Create rule", exact: true }).click();
   await page.getByLabel("Rule name", { exact: true }).fill("");
-  await page.getByRole("button", { name: "Save draft" }).click();
+  await page.getByRole("button", { name: "Save rule" }).click();
   await expect(
     page.getByText("Name this rule so it is recognizable"),
   ).toBeVisible();
   await page
     .getByLabel("Rule name", { exact: true })
     .fill("Browser test breakout");
-  await page.getByRole("button", { name: "Save draft" }).click();
+  await page.getByRole("button", { name: "Save rule" }).click();
   await expect(
     page.getByRole("heading", { name: "Rules & alerts." }),
   ).toBeVisible();
   await page
-    .getByRole("button", { name: "Run replay for Browser test breakout" })
+    .getByRole("button", { name: "Test rule: Browser test breakout" })
     .click();
-  await page.getByRole("button", { name: "Run replay", exact: true }).click();
+  await page.getByRole("button", { name: "Run test", exact: true }).click();
+  await expect(page.locator(".replay-answer")).toContainText("alerts");
+  await page.getByText("Evaluation statistics", { exact: true }).click();
   await expect(
     page.getByText("Trigger periods", { exact: true }),
   ).toBeVisible();
@@ -63,7 +78,7 @@ test("create, invalid fields, replay, edit immutable version and persist", async
   await page
     .getByLabel("Rule name", { exact: true })
     .fill("Browser test revised");
-  await page.getByRole("button", { name: "Save draft" }).click();
+  await page.getByRole("button", { name: "Save rule" }).click();
   await page.getByRole("button", { name: "Browser test revised v2" }).click();
   await expect(page.getByRole("dialog")).toContainText("Version 1");
   await expect(page.getByRole("dialog")).toContainText("Version 2");
@@ -87,6 +102,9 @@ test("ambiguous description, search empty state, cancel and data health", async 
   await page.goto("/");
   await page.getByRole("button", { name: "Create rule", exact: true }).click();
   await page
+    .getByText("Describe your idea (optional)", { exact: true })
+    .click();
+  await page
     .getByLabel("Market condition in plain English")
     .fill("Brent rises 2%");
   await page.getByRole("button", { name: "Build from description" }).click();
@@ -98,9 +116,9 @@ test("ambiguous description, search empty state, cancel and data health", async 
   await expect(page.getByText("No matching rules")).toBeVisible();
   await page.getByRole("button", { name: "Clear search" }).click();
   await page
-    .getByRole("button", { name: "Run replay for Brent breaks $82.50" })
+    .getByRole("button", { name: "Test rule: Brent breaks $82.50" })
     .click();
-  await page.getByRole("button", { name: "Run replay", exact: true }).click();
+  await page.getByRole("button", { name: "Run test", exact: true }).click();
   await page.getByRole("button", { name: "Cancel replay" }).click();
   await expect(
     page.getByText("Replay canceled. No report was saved."),
@@ -124,8 +142,8 @@ test("option chain, strategy and volatility data remain interactive", async ({
     page.getByText("Synthetic", { exact: false }).first(),
   ).toBeVisible();
   await expect(
-    page.getByRole("heading", { name: "Options ladder & volatility" }),
-  ).toBeVisible();
+    page.getByRole("heading", { name: "Explore options" }),
+  ).toBeVisible({ timeout: 15000 });
   await page.screenshot({
     path: "docs/evidence/options-desktop.png",
     fullPage: true,

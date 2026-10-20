@@ -82,10 +82,7 @@ export const getLocalTzLabel = (): string => {
   return `UTC${sign}${hours}${mins ? `:${mins}` : ""}`;
 };
 
-export const timestamp = (
-  value: number,
-  tz: "UTC" | "utc" | "local" = "UTC",
-) =>
+export const timestamp = (value: number, tz: "UTC" | "utc" | "local" = "UTC") =>
   new Date(value).toLocaleString("en-GB", {
     day: "2-digit",
     month: "short",

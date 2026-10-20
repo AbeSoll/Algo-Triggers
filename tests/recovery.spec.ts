@@ -1,5 +1,14 @@
 import { test, expect } from "@playwright/test";
 
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() =>
+    localStorage.setItem("algo-triggers-market-source", "demo"),
+  );
+  await page.route("**/api/**", (route) =>
+    route.fulfill({ json: { success: false } }),
+  );
+});
+
 test("corrupt local data has an explicit reset recovery", async ({ page }) => {
   await page.addInitScript(() => {
     if (!sessionStorage.getItem("injected")) {
@@ -17,7 +26,7 @@ test("corrupt local data has an explicit reset recovery", async ({ page }) => {
     .click();
   await expect(page.getByRole("alert")).toHaveCount(0);
   await page.getByRole("button", { name: "Create rule", exact: true }).click();
-  await page.getByRole("button", { name: "Save draft", exact: true }).click();
+  await page.getByRole("button", { name: "Save rule", exact: true }).click();
   await expect(page.getByRole("status")).toContainText("Saved");
 });
 
@@ -32,7 +41,7 @@ test("storage write failure preserves the unsaved draft", async ({ page }) => {
   await page
     .getByLabel("Rule name", { exact: true })
     .fill("Preserve my research");
-  await page.getByRole("button", { name: "Save draft", exact: true }).click();
+  await page.getByRole("button", { name: "Save rule", exact: true }).click();
   await expect(page.getByRole("dialog")).toBeVisible();
   await expect(page.getByLabel("Rule name", { exact: true })).toHaveValue(
     "Preserve my research",
@@ -54,11 +63,11 @@ test("a new one-shot monitor starts at activation, not historical fixture start"
     .getByRole("combobox", { name: "Condition", exact: true })
     .selectOption("above");
   await page.getByLabel("Threshold (USD/bbl)", { exact: true }).fill("0");
-  await page.getByText("Evaluation & alert behavior").click();
+  await page.getByText("Advanced settings").click();
   await page
-    .getByRole("combobox", { name: "Frequency", exact: true })
+    .getByRole("combobox", { name: "Alert frequency", exact: true })
     .selectOption("once");
-  await page.getByRole("button", { name: "Save draft", exact: true }).click();
+  await page.getByRole("button", { name: "Save rule", exact: true }).click();
   await page
     .getByRole("button", {
       name: "Start demo monitoring for One-shot above zero",
@@ -102,6 +111,7 @@ test("EMA values retain full warm-up when the visible range changes", async ({
   page,
 }) => {
   await page.goto("/");
+  await page.getByText("Indicator settings ·", { exact: false }).click();
   await page.getByLabel("Average method", { exact: true }).selectOption("EMA");
   const fiveDay = await page.getByTestId("ma-value-0").innerText();
   await page.getByRole("button", { name: "1D", exact: true }).click();
@@ -120,11 +130,11 @@ test("resume preserves cooldown measured from an actual emission", async ({
     .getByRole("combobox", { name: "Condition", exact: true })
     .selectOption("above");
   await page.getByLabel("Threshold (USD/bbl)", { exact: true }).fill("0");
-  await page.getByText("Evaluation & alert behavior").click();
+  await page.getByText("Advanced settings").click();
   await page
-    .getByRole("combobox", { name: "Frequency", exact: true })
+    .getByRole("combobox", { name: "Alert frequency", exact: true })
     .selectOption("bar");
-  await page.getByRole("button", { name: "Save draft", exact: true }).click();
+  await page.getByRole("button", { name: "Save rule", exact: true }).click();
   await page
     .getByRole("button", {
       name: "Start demo monitoring for Cooldown stays intact",
@@ -186,10 +196,11 @@ test("stored report opens its original snapshot after chart timeframe changes", 
 }) => {
   await page.goto("/?view=rules");
   await page
-    .getByRole("button", { name: "Run replay for Brent breaks $82.50" })
+    .getByRole("button", { name: "Test rule: Brent breaks $82.50" })
     .click();
   await page.getByLabel("Start date · UTC").fill("2026-10-14");
-  await page.getByRole("button", { name: "Run replay", exact: true }).click();
+  await page.getByRole("button", { name: "Run test", exact: true }).click();
+  await page.getByText("Evaluation statistics", { exact: true }).click();
   await expect(
     page.getByText("Trigger periods", { exact: true }),
   ).toBeVisible();

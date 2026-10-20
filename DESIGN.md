@@ -66,7 +66,7 @@ Shared styles own buttons, native select/input fields, badges, panel headers, ta
 
 The shared `Modal` owns dialog focus, Escape and restoration. One status region owns feedback. Charts have data alternatives and keyboard zoom controls. Native buttons with `aria-pressed` switch local chart modes; route links use `aria-current`. The demo provides no full custom ARIA tab widget.
 
-Content uses precise action verbs: Create rule, Save draft, Run replay, Inspect event, Start demo monitoring. Prices show USD/bbl. Historical counts never imply profitability. Synthetic mode is persistent across all views. Motion is limited to short feedback and an optional loading spinner; reduced motion stops animations.
+Content uses precise action verbs: Create rule, Save rule, Test rule, Run test, Inspect event, Start demo monitoring. Futures prices show USD/bbl; Yahoo oil fund options show USD/share. Historical counts never imply profitability. An explicit source selector distinguishes Yahoo snapshots from synthetic samples; rule tests and monitoring remain synthetic. Motion is limited to short feedback and an optional loading spinner; reduced motion stops animations.
 
 ## Do's and Don'ts
 
@@ -74,3 +74,17 @@ Content uses precise action verbs: Create rule, Save draft, Run replay, Inspect 
 - Do expose timestamps, fields, calculation definitions and unknown data.
 - Don't claim a sample quote is a real-time ICE feed.
 - Don't make profit, execution or production-readiness claims for this browser demo.
+
+## Workflow simplicity
+
+The primary rule journey uses three templates: price level, percentage move and moving-average crossover. Contract, essential condition fields and a readable summary are visible. The summary always exposes timeframe, calculation field, frequency and cooldown. Describe your idea is an optional disclosure that fills the same reviewable form. Advanced settings hold timeframe, alert policy and adding conditions; existing additional conditions remain visible and survive template changes.
+
+Market indicator settings use a native disclosure, with the active method and periods in its summary. Saved rules keep Test rule and monitoring controls on the primary action line, with quieter Edit and Duplicate buttons always available below. The action layout stays stable without expanding disclosures. Test results lead with the alert count; evaluation statistics and exact condition values are available on demand.
+
+Options Lab shows one task at a time: premiums, strategy construction or volatility. Switching these views retains the current strategy edits. Greeks are optional in both the chain and inspected quote. Source labels identify observed Yahoo snapshots, explicit demo samples, loading or unavailable states; no source rights or exchange equivalence are implied by this UI.
+
+## Market data provenance
+
+`DataSourceNotice` owns source, provider observation time, fetch time, age and unverified delay across market views. A successful HTTP response or healthy local server never proves market connectivity. Yahoo mode never substitutes synthetic bars or quotes. Missing inputs remain unavailable, with a retry action; the separate Demo samples mode is deliberate and persistent. Quote age describes the supplied observation time, not a promise of market freshness or exchange-open status.
+
+Option views identify BNO/USO as fund options, with USD/share units and per-expiry requests. Yahoo Greeks are unavailable until a verified pricing model exists. The observed-IV view shows only the selected expiry's supplied IV; the illustrative multi-expiry mesh remains demo-only. Rule tests, monitoring and event evidence always name their synthetic dataset regardless of the market display source.

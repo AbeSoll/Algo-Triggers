@@ -100,7 +100,7 @@ export default function ReplayDialog({
     onClose();
   };
   return (
-    <Modal title="Historical trigger replay" onClose={close} wide>
+    <Modal title="Test rule on sample history" onClose={close} wide>
       <div className="replay-rule">
         <span className="badge badge-purple">
           {rule.name} · v{rule.version}
@@ -158,7 +158,7 @@ export default function ReplayDialog({
             ) : (
               <Play size={15} />
             )}
-            Run replay
+            Run test
           </button>
         </div>
       </form>
@@ -190,39 +190,49 @@ export default function ReplayDialog({
           </div>
         ) : result ? (
           <>
-            <div className="result-stats">
-              <div>
-                <span>Triggers</span>
-                <strong>{result.events.length}</strong>
-              </div>
-              <div>
-                <span>Trigger periods</span>
-                <strong>
-                  {result.triggerPeriodPct.toFixed(2)}
-                  <small>%</small>
-                </strong>
-              </div>
-              <div>
-                <span>Mean event gap</span>
-                <strong>
-                  {result.meanGapMinutes === null
-                    ? "—"
-                    : result.meanGapMinutes.toFixed(0)}
-                  <small> min</small>
-                </strong>
-              </div>
-              <div>
-                <span>Eligible bars</span>
-                <strong>
-                  {result.eligibleBars}
-                  <small> / {result.totalBars}</small>
-                </strong>
-              </div>
+            <div className="replay-answer rule-live-card">
+              <span>How many times did it happen?</span>
+              <strong>
+                {result.events.length}{" "}
+                {result.events.length === 1 ? "alert" : "alerts"}
+              </strong>
+              <small>
+                Across {start} to {end} · {timeframe} sample bars · subject to
+                your alert policy
+              </small>
             </div>
-            <p className="hint">
-              Trigger periods = periods with an emitted event ÷ eligible
-              periods. Warm-up and unknown observations are excluded.
-            </p>
+            <details className="advanced">
+              <summary>Evaluation statistics</summary>
+              <div className="result-stats">
+                <div>
+                  <span>Trigger periods</span>
+                  <strong>
+                    {result.triggerPeriodPct.toFixed(2)}
+                    <small>%</small>
+                  </strong>
+                </div>
+                <div>
+                  <span>Mean event gap</span>
+                  <strong>
+                    {result.meanGapMinutes === null
+                      ? "—"
+                      : result.meanGapMinutes.toFixed(0)}
+                    <small> min</small>
+                  </strong>
+                </div>
+                <div>
+                  <span>Eligible bars</span>
+                  <strong>
+                    {result.eligibleBars}
+                    <small> / {result.totalBars}</small>
+                  </strong>
+                </div>
+              </div>
+              <p className="hint">
+                Trigger periods = periods with an emitted event ÷ eligible
+                periods. Warm-up and unknown observations are excluded.
+              </p>
+            </details>
             {result.events.length ? (
               <div className="table-wrap replay-events">
                 <table>

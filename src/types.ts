@@ -4,7 +4,7 @@ export interface Bar {
   high: number;
   low: number;
   close: number;
-  volume: number;
+  volume: number | null;
 }
 export interface Condition {
   id: string;
@@ -17,6 +17,7 @@ export interface Condition {
   windowBars: number;
   optionType?: "call" | "put";
   strike?: number;
+  unit?: "USD/bbl" | "USD/share";
   priceField?: "bid" | "ask" | "last" | "mark";
   optionExpiry?: string;
   optionUnderlying?: string;

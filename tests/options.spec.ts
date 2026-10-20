@@ -2,9 +2,18 @@ import { expect, test } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 
 test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() =>
+    localStorage.setItem("algo-triggers-market-source", "demo"),
+  );
+  await page.route("**/api/**", (route) =>
+    route.fulfill({ json: { success: false } }),
+  );
+});
+
+test.beforeEach(async ({ page }) => {
   await page.goto("/?view=options");
   await expect(
-    page.getByRole("heading", { name: "Options ladder & volatility" }),
+    page.getByRole("heading", { name: "Explore options" }),
   ).toBeVisible();
 });
 
@@ -18,13 +27,13 @@ test("option rule draft preserves expiry, actual underlying and chosen ask field
 
   const editor = page.getByRole("dialog");
   await expect(
-    editor.getByRole("combobox", { name: "Instrument", exact: true }),
+    editor.getByRole("combobox", { name: "Futures contract", exact: true }),
   ).toHaveValue("brent-jan27");
   await expect(
-    editor.getByRole("combobox", { name: "Instrument", exact: true }),
+    editor.getByRole("combobox", { name: "Futures contract", exact: true }),
   ).toBeDisabled();
   await expect(
-    editor.getByRole("combobox", { name: "Measure", exact: true }),
+    editor.getByRole("combobox", { name: "Indicator / Measure", exact: true }),
   ).toHaveValue("option_premium");
   await expect(editor.locator(".notice")).toContainText("CALL 84");
   await expect(editor.locator(".notice")).toContainText("2026-11-25");
@@ -44,7 +53,7 @@ test("option rule draft preserves expiry, actual underlying and chosen ask field
   await editor
     .getByLabel("Rule name", { exact: true })
     .fill("Option ask identity test");
-  await editor.getByRole("button", { name: "Save draft", exact: true }).click();
+  await editor.getByRole("button", { name: "Save rule", exact: true }).click();
   await expect(
     page.getByRole("heading", { name: "Rules & alerts." }),
   ).toBeVisible();
@@ -106,6 +115,9 @@ test("collar includes signed futures exposure and reconciles changing quantities
   page,
 }) => {
   await page
+    .getByRole("button", { name: "Build strategy", exact: true })
+    .click();
+  await page
     .getByRole("button", { name: "Long-futures collar", exact: true })
     .click();
   await expect(page.locator(".underlying-leg")).toContainText(
@@ -143,6 +155,9 @@ test("collar includes signed futures exposure and reconciles changing quantities
 test("invalid put vertical shows validation and suppresses aggregate valuation", async ({
   page,
 }) => {
+  await page
+    .getByRole("button", { name: "Build strategy", exact: true })
+    .click();
   await page
     .getByRole("combobox", { name: "Leg 2 type", exact: true })
     .selectOption("call");

@@ -2,7 +2,7 @@
 
 No-code Brent futures and options research, historical trigger replay, and alerting terminal.
 
-The frontend research demo is implemented with React, TypeScript and Vite. All prices, option quotes and market events are synthetic fixtures. Rules and reports are stored only in this browser. No live ICE data, backend or order execution is connected.
+The research workspace uses React, TypeScript and Vite. Market displays default to Yahoo Finance snapshots; **Demo samples** is an explicit alternative. Missing provider data stays unavailable, with no automatic synthetic substitution. Rules, sample replay reports and demo monitoring events are stored in this browser. No licensed ICE feed, production alert service or order execution is connected.
 
 ## Run the frontend
 
@@ -14,6 +14,10 @@ npm run dev
 ```
 
 Open the printed local URL, normally `http://127.0.0.1:5173/`. The development server binds to loopback only.
+
+The development server includes the read-only `/api` market adapter. Yahoo availability and delay are unverified. Source notices distinguish provider observation time, fetch time and quote age. Fixed futures contracts must resolve to their own listed symbols. BNO/USO options are oil fund options in USD/share, not ICE futures options. Greeks and a full observed term surface remain unavailable until supported inputs/models are configured. Rule tests and monitoring always use the synthetic dataset, independently of the market display mode.
+
+`npm run server` runs the API separately on loopback port 3001. A built static frontend needs an explicit same-origin `/api` deployment route; `vite preview` alone does not supply that route. See [market-data handoff](docs/MARKET-DATA-HANDOFF.md).
 
 ```sh
 npm run typecheck
