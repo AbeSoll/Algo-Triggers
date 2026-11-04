@@ -1192,7 +1192,15 @@ export default function App() {
                         className="icon-button"
                         onClick={() => reloadLiveBars(true)}
                         aria-label="Refresh market snapshot"
-                        title="Refresh the selected Yahoo snapshot"
+                        disabled={DEMO_ONLY || isLiveLoading}
+                        aria-describedby={
+                          DEMO_ONLY ? "hosted-demo-note" : undefined
+                        }
+                        title={
+                          DEMO_ONLY
+                            ? "Live refresh is unavailable in this sample demo."
+                            : "Refresh the selected Yahoo snapshot"
+                        }
                       >
                         <RefreshCw
                           size={16}

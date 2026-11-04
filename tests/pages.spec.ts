@@ -24,6 +24,9 @@ test("hosted demo works under its repository path without any backend", async ({
   });
   await expect(source).toHaveValue("demo");
   await expect(source).toBeDisabled();
+  await expect(
+    page.getByRole("button", { name: "Refresh market snapshot", exact: true }),
+  ).toBeDisabled();
   await expect(page.locator(".chart-canvas canvas").first()).toBeVisible();
   await page.screenshot({
     path: "docs/evidence/pages-demo-desktop.png",
