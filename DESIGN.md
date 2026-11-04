@@ -88,3 +88,7 @@ Options Lab shows one task at a time: premiums, strategy construction or volatil
 `DataSourceNotice` owns source, provider observation time, fetch time, age and unverified delay across market views. A successful HTTP response or healthy local server never proves market connectivity. Yahoo mode never substitutes synthetic bars or quotes. Missing inputs remain unavailable, with a retry action; the separate Demo samples mode is deliberate and persistent. Quote age describes the supplied observation time, not a promise of market freshness or exchange-open status.
 
 Option views identify BNO/USO as fund options, with USD/share units and per-expiry requests. Yahoo Greeks are unavailable until a verified pricing model exists. The observed-IV view shows only the selected expiry's supplied IV; the illustrative multi-expiry mesh remains demo-only. Rule tests, monitoring and event evidence always name their synthetic dataset regardless of the market display source.
+
+## Hosted presentation demo
+
+The Pages build is a separate demo-only deployment. A persistent shared provenance notice names synthetic data, browser-local storage and unavailable live/email services. The source selector is locked to Demo samples, including when an old Yahoo preference exists. Monitoring remains manual sample playback and never calls the email API. Email and live-price check buttons are disabled with an associated explanation. Standard local builds retain their existing server behavior.

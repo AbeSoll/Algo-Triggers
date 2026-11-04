@@ -57,6 +57,8 @@ import ReplayDialog, { type StoredRun } from "./ReplayDialog";
 import { Empty, Modal, money, timestamp } from "./ui";
 const OptionsLab = lazy(() => import("./OptionsLab"));
 type View = "market" | "rules" | "options" | "history";
+import { DEMO_ONLY } from "./deployment";
+
 type Store = {
   schema: number;
   revision: number;
@@ -71,6 +73,8 @@ type Store = {
 const KEY = "algo-triggers-demo-v1";
 
 async function postDesk(path: string, body?: unknown) {
+  if (DEMO_ONLY)
+    throw new Error("Email and live monitoring are unavailable in this demo.");
   const response = await fetch(path, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -266,6 +270,7 @@ export default function App() {
 
   // Live Yahoo Finance data state
   const [dataMode, setDataMode] = useState<MarketMode>(() => {
+    if (DEMO_ONLY) return "demo";
     try {
       return localStorage.getItem("algo-triggers-market-source") === "demo"
         ? "demo"
@@ -547,6 +552,14 @@ export default function App() {
           ? "Demo monitoring started in this browser."
           : "Demo monitoring paused.",
       );
+      if (DEMO_ONLY) {
+        setNotice(
+          next === "monitoring"
+            ? "Sample monitoring started. Press Advance demo bar to evaluate the next sample. No email is sent."
+            : "Sample monitoring paused.",
+        );
+        return;
+      }
       const request =
         next === "monitoring"
           ? postDesk("/api/desk/watches", { rule })
@@ -769,9 +782,11 @@ export default function App() {
                         aria-label={`${rule.status === "monitoring" ? "Pause" : "Start demo monitoring for"} ${rule.name}`}
                         onClick={() => status(rule)}
                         title={
-                          rule.status === "monitoring"
-                            ? "Pause the demo and the email watch"
-                            : "Watch Yahoo prices and email a new hit"
+                          DEMO_ONLY
+                            ? "Sample monitoring only. Use Advance demo bar; no email is sent."
+                            : rule.status === "monitoring"
+                              ? "Pause the demo and the email watch"
+                              : "Watch Yahoo prices and email a new hit"
                         }
                       >
                         {rule.status === "monitoring" ? (
@@ -913,10 +928,13 @@ export default function App() {
             >
               <Activity size={18} />
             </span>
-            <strong>Market snapshots</strong>
+            <strong>
+              {DEMO_ONLY ? "Presentation demo" : "Market snapshots"}
+            </strong>
             <p>
-              Yahoo observations or explicitly selected demo samples. Rule tests
-              and monitoring use synthetic data.
+              {DEMO_ONLY
+                ? "Synthetic market samples. Rules and results stay in this browser. No live feed or email delivery."
+                : "Yahoo observations or explicitly selected demo samples. Rule tests and monitoring use synthetic data."}
             </p>
             <span className="side-demo-badge">No automatic trading</span>
           </div>
@@ -951,6 +969,8 @@ export default function App() {
               Market data
               <select
                 value={dataMode}
+                disabled={DEMO_ONLY}
+                aria-describedby={DEMO_ONLY ? "hosted-demo-note" : undefined}
                 onChange={(e) => {
                   const next = e.target.value as MarketMode;
                   setDataMode(next);
@@ -963,7 +983,7 @@ export default function App() {
                   }
                 }}
               >
-                <option value="yahoo">Yahoo snapshots</option>
+                {!DEMO_ONLY && <option value="yahoo">Yahoo snapshots</option>}
                 <option value="demo">Demo samples</option>
               </select>
             </label>
@@ -985,6 +1005,20 @@ export default function App() {
           </div>
         </header>
         <main id="main-content">
+          {DEMO_ONLY && (
+            <aside
+              className="data-source-notice"
+              id="hosted-demo-note"
+              aria-label="Presentation demo"
+            >
+              <strong>Presentation demo · synthetic data</strong>
+              <span>
+                Create a rule, run a sample test, then inspect an event. Saved
+                work stays in this browser. Live prices and email alerts are
+                unavailable.
+              </span>
+            </aside>
+          )}
           <div className="page-heading">
             <div>
               <div className="eyebrow">BRENT RESEARCH · SNAPSHOTS & DEMO</div>
@@ -1452,9 +1486,9 @@ export default function App() {
                   <div>
                     <h2>Saved rules & versions</h2>
                     <p>
-                      Press Monitor demo. A new Yahoo hit emails your configured
-                      inbox. Earlier versions stay intact, and sample bars still
-                      step here.
+                      {DEMO_ONLY
+                        ? "Test rules on sample history, or use Monitor demo and Advance demo bar for manual playback. No email is sent. Earlier versions stay intact."
+                        : "Press Monitor demo. A new Yahoo hit emails your configured inbox. Earlier versions stay intact, and sample bars still step here."}
                     </p>
                   </div>
                   <div className="desk-actions">
@@ -1466,11 +1500,25 @@ export default function App() {
                       <Play size={14} />
                       Advance demo bar
                     </button>
-                    <button className="btn btn-outline" onClick={sendTestEmail}>
+                    <button
+                      className="btn btn-outline"
+                      onClick={sendTestEmail}
+                      disabled={DEMO_ONLY}
+                      aria-describedby={
+                        DEMO_ONLY ? "hosted-demo-note" : undefined
+                      }
+                    >
                       <Bell size={14} />
                       Send test email
                     </button>
-                    <button className="btn btn-outline" onClick={checkPrices}>
+                    <button
+                      className="btn btn-outline"
+                      onClick={checkPrices}
+                      disabled={DEMO_ONLY}
+                      aria-describedby={
+                        DEMO_ONLY ? "hosted-demo-note" : undefined
+                      }
+                    >
                       Check prices now
                     </button>
                   </div>
@@ -1925,8 +1973,9 @@ export default function App() {
               <section>
                 <h3>Find a pattern</h3>
                 <p>
-                  Explore Yahoo snapshots or synthetic demo futures. Candles and
-                  SMA/EMA overlays use the same sample bars as replay.
+                  {DEMO_ONLY
+                    ? "Explore synthetic futures. Candles and SMA/EMA overlays use the same sample bars as replay."
+                    : "Explore Yahoo snapshots or synthetic demo futures. Candles and SMA/EMA overlays use the same sample bars as replay."}
                 </p>
               </section>
             </div>

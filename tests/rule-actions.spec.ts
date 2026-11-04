@@ -46,7 +46,9 @@ test("rule actions stay discoverable and keyboard editing restores focus", async
   await expect(edit).toBeFocused();
   const after = await actions.boundingBox();
   expect(Math.abs((after?.width ?? 0) - (before?.width ?? 0))).toBeLessThan(8);
-  expect(Math.abs((after?.height ?? 0) - (before?.height ?? 0))).toBeLessThan(8);
+  expect(Math.abs((after?.height ?? 0) - (before?.height ?? 0))).toBeLessThan(
+    8,
+  );
   await page.keyboard.press("Tab");
   await expect(duplicate).toBeFocused();
   await page.screenshot({

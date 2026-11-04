@@ -3,7 +3,9 @@ import react from "@vitejs/plugin-react";
 // @ts-ignore - JavaScript ES module handler
 import { handleApiRequest } from "./server/apiHandler.mjs";
 
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
+  base: mode === "pages" ? "/Algo-Triggers-demo/" : "/",
+  define: { __DEMO_ONLY__: JSON.stringify(mode === "pages") },
   plugins: [
     react(),
     {
@@ -25,4 +27,4 @@ export default defineConfig({
     },
   ],
   server: { port: 5173, strictPort: true },
-});
+}));

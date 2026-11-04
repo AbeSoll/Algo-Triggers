@@ -40,3 +40,11 @@ The original team brief is preserved in [docs/source](docs/source/Algo%20Trigger
 The requested Caveman communication skill is included under [.agents/skills/caveman](.agents/skills/caveman/SKILL.md). It keeps chat concise; the specification and financial logic retain full detail. It will be available on the next turn after the host discovers this project.
 
 See [preparation status](docs/PREPARATION-STATUS.md) for repository evidence, integration limitations and validation performed. Git history records publication of this documentation pack.
+
+## GitHub Pages presentation demo
+
+The private source repository verifies and builds the demo on pushes to `main`. The public `AbeSoll/Algo-Triggers-demo` repository contains only generated website files and serves `https://AbeSoll.github.io/Algo-Triggers-demo/`. The source repository remains private. Deployment to the public repository is a separate publish step; a source push alone does not update the public site.
+
+`npm.cmd run build:pages` builds with `/Algo-Triggers-demo/` asset paths and locks all views to Demo samples. `npm.cmd run test:pages` verifies the built site. Copy only the resulting `dist` contents into the public demo repository, retain `.nojekyll`, commit and push its `main` branch. GitHub Pages serves that branch's root. Never copy `.env`, local databases, server modules or source-repository history.
+
+The standard `npm.cmd run dev` and `npm.cmd run build` retain server-backed functionality. The hosted demo never calls the Yahoo/email API; email and live checks are visibly unavailable. Rules, tests and manual sample monitoring stay local to each browser. The compiled frontend is publicly accessible; this is not a private production desk.
