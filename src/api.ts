@@ -71,7 +71,7 @@ export interface LiveOptionsData {
   strikes: number[];
   quotes: LiveQuote[];
   meta: DataMeta;
-  greekSource: "unavailable";
+  greekSource: "unavailable" | "black-scholes";
   greekNote: string;
   quoteTimeNote: string;
 }

@@ -20,6 +20,63 @@ function sendJson(res, data, status = 200) {
   res.end(body);
 }
 
+function readJson(req) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    req.on("data", (chunk) => {
+      chunks.push(chunk);
+      const size = chunks.reduce((total, part) => total + part.length, 0);
+      if (size > 1_000_000) reject(new Error("Request body is too large."));
+    });
+    req.on("end", () => {
+      const text = Buffer.concat(chunks).toString("utf8");
+      if (!text) return resolve({});
+      try {
+        resolve(JSON.parse(text));
+      } catch {
+        reject(new Error("Request body must be JSON."));
+      }
+    });
+    req.on("error", reject);
+  });
+}
+
+async function handleDesk(req, res, parsed) {
+  const desk = await import("./desk.mjs");
+  const pathname = parsed.pathname.replace(/\/$/, "") || "/";
+  if (req.method === "GET" && pathname === "/api/desk") {
+    sendJson(res, desk.listDesk());
+    return true;
+  }
+  if (req.method === "POST" && pathname === "/api/desk/watches") {
+    const body = await readJson(req);
+    sendJson(
+      res,
+      await desk.armWatch({
+        rule: body.rule,
+        email: body.email,
+        active: body.active !== false,
+      }),
+    );
+    return true;
+  }
+  if (req.method === "POST" && pathname === "/api/desk/watches/pause") {
+    const body = await readJson(req);
+    sendJson(res, desk.pauseWatch(body));
+    return true;
+  }
+  if (req.method === "POST" && pathname === "/api/desk/test-email") {
+    const body = await readJson(req);
+    sendJson(res, await desk.sendTestEmail(body.email));
+    return true;
+  }
+  if (req.method === "POST" && pathname === "/api/desk/tick") {
+    sendJson(res, await desk.tick());
+    return true;
+  }
+  return false;
+}
+
 function sendError(res, message, status = 503) {
   sendJson(
     res,
@@ -38,7 +95,18 @@ function sendError(res, message, status = 503) {
   );
 }
 
+let deskReady = null;
+function ensureDesk() {
+  if (process.env.VITEST) return;
+  if (!deskReady) {
+    deskReady = import("./desk.mjs")
+      .then((desk) => desk.startDesk())
+      .catch((error) => console.error("[desk] failed to start", error));
+  }
+}
+
 export async function handleApiRequest(req, res) {
+  ensureDesk();
   // Handle CORS preflight
   if (req.method === "OPTIONS") {
     res.writeHead(204, {
@@ -107,6 +175,23 @@ export async function handleApiRequest(req, res) {
       const data = await getOptionsData(symbol, date);
       sendJson(res, { success: true, ...data });
       return true;
+    }
+
+    if (pathname.startsWith("/api/desk")) {
+      try {
+        return await handleDesk(req, res, parsed);
+      } catch (error) {
+        sendJson(
+          res,
+          {
+            success: false,
+            error:
+              error instanceof Error ? error.message : "Desk request failed.",
+          },
+          400,
+        );
+        return true;
+      }
     }
 
     // Provider status summary

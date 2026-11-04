@@ -775,6 +775,12 @@ main {
 .panel-heading h2 {
   font-size: 14px;
 }
+.desk-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
 .count-label {
   font-size: 10px;
   font-weight: 500;

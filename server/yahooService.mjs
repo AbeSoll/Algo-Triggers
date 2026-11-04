@@ -258,6 +258,50 @@ function standardNormalPdf(x) {
   return Math.exp(-0.5 * x * x) / Math.sqrt(2 * Math.PI);
 }
 
+export const GREEK_NOTE =
+  "Model estimate, not an exchange print. European Black-Scholes using Yahoo implied volatility, a flat 4% rate, and no dividend. BNO and USO options are American, so treat delta, gamma, theta, and vega as a teaching approximation.";
+
+const RISK_FREE_RATE = 0.04;
+const YEAR_MS = 365.25 * 24 * 60 * 60 * 1000;
+
+/** Greeks only when Yahoo supplied a positive IV and the expiry is still ahead. */
+export function estimateGreeks(
+  underlying,
+  strike,
+  ivPercent,
+  expiry,
+  type,
+  now = Date.now(),
+) {
+  const empty = { delta: null, gamma: null, theta: null, vega: null };
+  if (
+    !finite(ivPercent) ||
+    ivPercent <= 0 ||
+    !finite(underlying) ||
+    underlying <= 0
+  )
+    return empty;
+  const expiryMs = Date.parse(`${expiry}T00:00:00Z`);
+  const years = (expiryMs - now) / YEAR_MS;
+  if (!finite(years) || years <= 0.0001) return empty;
+  const computed = computeGreeks(
+    underlying,
+    strike,
+    years,
+    RISK_FREE_RATE,
+    ivPercent / 100,
+    type,
+  );
+  const values = [
+    computed.delta,
+    computed.gamma,
+    computed.theta,
+    computed.vega,
+  ];
+  if (values.some((value) => !finite(value))) return empty;
+  return computed;
+}
+
 export function computeGreeks(S, K, T, r, sigma, type) {
   if (T <= 0.0001 || sigma <= 0.001 || S <= 0 || K <= 0) {
     const isCall = type === "call";
@@ -358,6 +402,17 @@ export async function getOptionsData(symbol = "BNO", expiryDate = null) {
       const bid = price(raw.bid),
         ask = price(raw.ask);
       const validMarket = bid !== null && ask !== null && ask >= bid;
+      const iv =
+        finite(raw.impliedVolatility) && raw.impliedVolatility > 0
+          ? raw.impliedVolatility * 100
+          : null;
+      const greeks = estimateGreeks(
+        underlyingPrice,
+        raw.strike,
+        iv,
+        actualExpiry,
+        type,
+      );
       quotes.push({
         type,
         strike: raw.strike,
@@ -365,14 +420,11 @@ export async function getOptionsData(symbol = "BNO", expiryDate = null) {
         ask,
         last: price(raw.lastPrice),
         mark: validMarket ? (bid + ask) / 2 : null,
-        iv:
-          finite(raw.impliedVolatility) && raw.impliedVolatility > 0
-            ? raw.impliedVolatility * 100
-            : null,
-        delta: null,
-        gamma: null,
-        theta: null,
-        vega: null,
+        iv,
+        delta: greeks.delta,
+        gamma: greeks.gamma,
+        theta: greeks.theta,
+        vega: greeks.vega,
         volume: numeric(raw.volume),
         oi: numeric(raw.openInterest),
         lastTradeAt: iso(raw.lastTradeDate),
@@ -392,8 +444,12 @@ export async function getOptionsData(symbol = "BNO", expiryDate = null) {
     strikes,
     quotes,
     meta: metadata(symbol, iso(result.quote.regularMarketTime), fetchedAt),
-    greekSource: "unavailable",
-    greekNote: "Greeks unavailable: no verified pricing model configured.",
+    greekSource: quotes.some((quote) => quote.delta !== null)
+      ? "black-scholes"
+      : "unavailable",
+    greekNote: quotes.some((quote) => quote.delta !== null)
+      ? GREEK_NOTE
+      : "Greeks unavailable: Yahoo did not supply a positive implied volatility for this expiry.",
     quoteTimeNote:
       "Bid/ask observation times are not supplied by this endpoint.",
   });

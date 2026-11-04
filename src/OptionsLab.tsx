@@ -1047,7 +1047,7 @@ export default function OptionsLab({
               <CircleHelp size={15} />
               <p>
                 {liveOptions
-                  ? "Yahoo Finance option snapshot. Greeks unavailable: no verified pricing model configured."
+                  ? liveOptions.greekNote
                   : "Prices and Greeks are supplied illustrative fixtures."}{" "}
                 Mark = (bid + ask) / 2. Missing prices disable rules for that
                 field. No silent price fallback.

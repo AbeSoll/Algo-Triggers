@@ -69,6 +69,18 @@ type Store = {
   monitorLast?: Record<string, number>;
 };
 const KEY = "algo-triggers-demo-v1";
+
+async function postDesk(path: string, body?: unknown) {
+  const response = await fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body ?? {}),
+  });
+  const payload = await response.json();
+  if (!response.ok || payload.success !== true)
+    throw new Error(payload.error || "Email service unavailable.");
+  return payload as { message?: string; success: boolean };
+}
 const latest = (rules: Rule[]) =>
   Array.from(
     rules
@@ -529,12 +541,29 @@ export default function App() {
             : r,
         ),
       })
-    )
+    ) {
       setNotice(
         next === "monitoring"
-          ? "Demo monitoring started. Advance demo bars to evaluate it; closing this browser stops the demo."
+          ? "Demo monitoring started in this browser."
           : "Demo monitoring paused.",
       );
+      const request =
+        next === "monitoring"
+          ? postDesk("/api/desk/watches", { rule })
+          : postDesk("/api/desk/watches/pause", {
+              ruleId: rule.id,
+              version: rule.version,
+            });
+      void request.then(
+        (payload) => {
+          if (payload.message) setNotice(payload.message);
+        },
+        (error: Error) =>
+          setNotice(
+            `${error.message} Sample stepping in this browser still works.`,
+          ),
+      );
+    }
   }
   function duplicate(rule: Rule) {
     create({
@@ -544,6 +573,26 @@ export default function App() {
       name: `${rule.name} copy`,
       status: "draft",
     });
+  }
+  function sendTestEmail() {
+    void postDesk("/api/desk/test-email").then(
+      (payload) => setNotice(payload.message || "Test email recorded."),
+      (error: Error) => setNotice(error.message),
+    );
+  }
+  function checkPrices() {
+    const armed = rules.filter(
+      (rule) =>
+        rule.status === "monitoring" &&
+        rule.conditions.every(
+          (condition) => condition.metric !== "option_premium",
+        ),
+    );
+    void (async () => {
+      for (const rule of armed) await postDesk("/api/desk/watches", { rule });
+      const payload = await postDesk("/api/desk/tick");
+      setNotice(payload.message || "Price check finished.");
+    })().catch((error: Error) => setNotice(error.message));
   }
   function advance() {
     if (health !== "healthy") return;
@@ -721,8 +770,8 @@ export default function App() {
                         onClick={() => status(rule)}
                         title={
                           rule.status === "monitoring"
-                            ? "Pause"
-                            : "Start demo monitoring"
+                            ? "Pause the demo and the email watch"
+                            : "Watch Yahoo prices and email a new hit"
                         }
                       >
                         {rule.status === "monitoring" ? (
@@ -1403,18 +1452,28 @@ export default function App() {
                   <div>
                     <h2>Saved rules & versions</h2>
                     <p>
-                      Changes create a new version. Earlier evidence stays
-                      intact.
+                      Press Monitor demo. A new Yahoo hit emails your configured
+                      inbox. Earlier versions stay intact, and sample bars still
+                      step here.
                     </p>
                   </div>
-                  <button
-                    className="btn btn-outline"
-                    onClick={advance}
-                    disabled={!activeCount || health !== "healthy"}
-                  >
-                    <Play size={14} />
-                    Advance demo bar
-                  </button>
+                  <div className="desk-actions">
+                    <button
+                      className="btn btn-outline"
+                      onClick={advance}
+                      disabled={!activeCount || health !== "healthy"}
+                    >
+                      <Play size={14} />
+                      Advance demo bar
+                    </button>
+                    <button className="btn btn-outline" onClick={sendTestEmail}>
+                      <Bell size={14} />
+                      Send test email
+                    </button>
+                    <button className="btn btn-outline" onClick={checkPrices}>
+                      Check prices now
+                    </button>
+                  </div>
                 </div>
                 <div className="list-controls">
                   <div className="search-field">

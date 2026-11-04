@@ -1,6 +1,7 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import {
   clearProviderCache,
+  estimateGreeks,
   formatBarsFromChart,
   getBars,
   getInstruments,
@@ -139,7 +140,7 @@ describe("observed market data boundary", () => {
     expect(fetcher).toHaveBeenCalledTimes(1);
     expect(a.bars[0].close).toBe(81.654321);
   });
-  it("keeps missing or crossed option prices unavailable and does not invent Greeks or IV", async () => {
+  it("keeps missing prices and missing IV unavailable, and estimates Greeks only from supplied IV", async () => {
     vi.stubGlobal("fetch", optionFetch());
     const data = await getOptionsData("BNO");
     const missing = data.quotes.find((quote) => quote.strike === 68);
@@ -152,13 +153,47 @@ describe("observed market data boundary", () => {
       delta: null,
       volume: null,
     });
-    expect(data.quotes.find((quote) => quote.type === "put").mark).toBeNull();
+    expect(data.quotes.find((quote) => quote.type === "put")).toMatchObject({
+      mark: null,
+      delta: null,
+    });
     expect(data.quotes[0].bid).toBe(1.112345);
     expect(data.quotes[0].iv).toBeCloseTo(31.2345);
     expect(data.quotes[0].lastTradeAt).toBe(
       new Date(1792454300000).toISOString(),
     );
     expect(data.meta.source).toBe("yahoo");
+    const expiryStillAhead = Date.parse("2026-11-20T00:00:00Z") > Date.now();
+    if (expiryStillAhead) {
+      expect(data.greekSource).toBe("black-scholes");
+      expect(data.quotes[0].delta).toBeGreaterThan(0);
+      expect(data.quotes[0].delta).toBeLessThan(1);
+    }
+  });
+  it("estimates a call delta from Yahoo IV without treating it as an exchange print", () => {
+    const greeks = estimateGreeks(
+      67.123456,
+      66,
+      31.2345,
+      "2026-11-20",
+      "call",
+      Date.parse("2026-10-20T00:00:00Z"),
+    );
+    expect(greeks.delta).toBeGreaterThan(0.5);
+    expect(greeks.delta).toBeLessThan(1);
+    expect(greeks.gamma).toBeGreaterThan(0);
+    expect(greeks.vega).toBeGreaterThan(0);
+    expect(greeks.theta).toBeLessThan(0);
+    expect(
+      estimateGreeks(
+        67,
+        66,
+        null,
+        "2026-11-20",
+        "call",
+        Date.parse("2026-10-20T00:00:00Z"),
+      ).delta,
+    ).toBeNull();
   });
   it("requests and caches each expiry separately", async () => {
     const fetcher = optionFetch();

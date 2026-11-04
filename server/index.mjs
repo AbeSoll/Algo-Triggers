@@ -2,6 +2,7 @@
 // Lightweight Node HTTP server proxy for Yahoo Finance
 import http from "node:http";
 import { handleApiRequest } from "./apiHandler.mjs";
+import { startDesk } from "./desk.mjs";
 
 const PORT = process.env.PORT || 3001;
 const HOST = process.env.HOST || "127.0.0.1";
@@ -13,6 +14,8 @@ const server = http.createServer(async (req, res) => {
     res.end(JSON.stringify({ error: "Endpoint not found", path: req.url }));
   }
 });
+
+startDesk();
 
 server.listen(PORT, HOST, () => {
   console.log(
