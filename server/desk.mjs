@@ -278,11 +278,20 @@ export async function tick(loadBars = defaultLoadBars) {
 
 export function startDesk() {
   if (timer || process.env.VITEST) return;
-  timer = setInterval(() => {
-    tick().catch((error) => console.error("[desk]", error));
-  }, 60_000);
+  const runCycle = async () => {
+    try {
+      await tick();
+    } catch (error) {
+      console.error("[desk]", error);
+    }
+    try {
+      const { pilotWorkerTick } = await import("./pilotService.mjs");
+      await pilotWorkerTick();
+    } catch (error) {
+      console.error("[pilot-worker]", error);
+    }
+  };
+  timer = setInterval(runCycle, 60_000);
   timer.unref?.();
-  setTimeout(() => {
-    tick().catch((error) => console.error("[desk]", error));
-  }, 4_000).unref?.();
+  setTimeout(runCycle, 4_000).unref?.();
 }

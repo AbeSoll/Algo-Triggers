@@ -56,7 +56,8 @@ import RuleEditor, { makeRule } from "./RuleEditor";
 import ReplayDialog, { type StoredRun } from "./ReplayDialog";
 import { Empty, Modal, money, timestamp } from "./ui";
 const OptionsLab = lazy(() => import("./OptionsLab"));
-type View = "market" | "rules" | "options" | "history";
+const PilotDesk = lazy(() => import("./PilotDesk"));
+type View = "market" | "rules" | "options" | "history" | "pilot";
 import { DEMO_ONLY } from "./deployment";
 
 type Store = {
@@ -96,7 +97,7 @@ const latest = (rules: Rule[]) =>
       .values(),
   );
 const isView = (v: string | null): v is View =>
-  ["market", "rules", "options", "history"].includes(v ?? "");
+  ["market", "rules", "options", "history", "pilot"].includes(v ?? "");
 function readStore(): Store {
   let recovery: string | undefined;
   try {
@@ -227,6 +228,7 @@ const names: Record<View, string> = {
   rules: "Rules & alerts",
   options: "Options lab",
   history: "Event history",
+  pilot: "HedgeSignal pilot",
 };
 export default function App() {
   const [store, setStore] = useState<Store>(readStore);
@@ -911,6 +913,10 @@ export default function App() {
             <History size={18} />
             Event history
           </a>
+          <a {...setViewLink("pilot")}>
+            <ShieldCheck size={18} />
+            HedgeSignal pilot
+          </a>
         </nav>
         <div className="sidebar-divider" />
         <div className="workspace-label secondary-label">YOUR RESEARCH</div>
@@ -1033,7 +1039,9 @@ export default function App() {
                     ? "Turn an observation into a precise, testable signal."
                     : view === "options"
                       ? "See the structure behind premiums, exposures and volatility."
-                      : "Every signal has a story. Inspect the values behind it."}
+                      : view === "pilot"
+                        ? "Auditable hedging triggers, 4-valued evaluations and controlled email alerts."
+                        : "Every signal has a story. Inspect the values behind it."}
               </p>
             </div>
             <button className="btn btn-primary" onClick={() => create()}>
@@ -1714,6 +1722,18 @@ export default function App() {
                 setPage={setPage}
               />
             </section>
+          )}
+          {view === "pilot" && (
+            <Suspense
+              fallback={
+                <div className="empty">
+                  <Loader2 className="spinner" />
+                  Loading HedgeSignal pilot…
+                </div>
+              }
+            >
+              <PilotDesk onStatus={setNotice} />
+            </Suspense>
           )}
           <footer className="workspace-footer">
             <span>

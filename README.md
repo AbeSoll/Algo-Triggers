@@ -29,9 +29,17 @@ npm run test:e2e
 
 Browser tests use installed Microsoft Edge on Windows. See [frontend handoff](docs/FRONTEND-HANDOFF.md) for workflow coverage, limitations and verification evidence. Production output is generated in `dist/` by the build command.
 
+## HedgeSignal SRS v0.2 pilot
+
+Open `/?view=pilot` (**HedgeSignal pilot** in the sidebar) to exercise the SRS v0.2 pilot workflow:
+
+- **SDLC & SRS baseline:** [HedgeSignal SRS & System Design v0.2](docs/HedgeSignal-SRS-v02.md) (with embedded SVG diagrams in `docs/figures/`) and [HedgeSignal Project Report & Agile Plan v0.2](docs/HedgeSignal-Project-Report-v02.md).
+- **Exact decimal & 4-valued evaluation (`src/pilotDomain.ts`):** Base-10 BigInt comparisons (`TRUE`, `FALSE`, `NOT_EVALUABLE`, `ERROR`), strict freshness/unit/skew gates, EERD `MARKET` vs `BUSINESS` observation subtypes, and pre-activation controlled test suites (`TC-001`–`TC-005`).
+- **Durable pilot store, worker & outbox (`server/pilotService.mjs`, `server/db.mjs`):** Immutable `pilot_rule_versions`, atomic `pilot_trigger_events` + `pilot_notification_intents` (`PENDING`, `ACCEPTED`, `HELD`, `FAILED`, `UNKNOWN` reconciliation), server-enforced actor roles (`trader`, `approver`, `support`, `admin`, `viewer` + optional `PILOT_TOKEN`), monitoring gap disclosure (`/api/health/monitoring`), and append-only `pilot_audit_events`.
+
 ## Start here
 
-1. Review [the detailed requirements](docs/ALGO-TRIGGERS-REQUIREMENTS.md), including proposed choices and team decisions.
+1. Review [HedgeSignal SRS v0.2](docs/HedgeSignal-SRS-v02.md) and [the earlier requirements pack](docs/ALGO-TRIGGERS-REQUIREMENTS.md).
 2. Check [skills and plugins](docs/SKILLS-AND-PLUGINS.md).
 3. Review [the frontend handoff](docs/FRONTEND-HANDOFF.md) before connecting any backend or data provider. The [build prompts](docs/BUILD-PROMPT.md) remain available for staged future work.
 

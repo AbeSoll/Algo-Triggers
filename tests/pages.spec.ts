@@ -73,6 +73,12 @@ test("hosted demo works under its repository path without any backend", async ({
   await expect(page.locator(".options-chain-scroll")).toBeVisible();
   await page.getByRole("button", { name: "IV surface", exact: true }).click();
   await expect(page.locator(".surface-plot")).toBeVisible();
+  await page
+    .getByRole("link", { name: "HedgeSignal pilot", exact: true })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "HedgeSignal pilot." }),
+  ).toBeVisible();
   await page.reload();
   await expect(source).toHaveValue("demo");
   await page

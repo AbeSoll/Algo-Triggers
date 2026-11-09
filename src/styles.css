@@ -2790,3 +2790,75 @@ tbody tr:hover {
     background: CanvasText;
   }
 }
+
+.pilot-workspace {
+  display: grid;
+  gap: 18px;
+  min-width: 0;
+}
+.pilot-controls-inline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: flex-end;
+}
+.pilot-obs-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+  align-items: end;
+  margin-bottom: 14px;
+}
+.pilot-obs-submit {
+  display: flex;
+  align-items: flex-end;
+}
+.pilot-ntf-row {
+  display: grid;
+  gap: 3px;
+  margin-bottom: 4px;
+}
+.pilot-support-btns {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.pilot-rule-form {
+  display: grid;
+  gap: 14px;
+}
+.pilot-form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 10px;
+}
+.pilot-conditions-section {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--canvas);
+}
+.pilot-conditions-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+.pilot-condition-row {
+  display: grid;
+  grid-template-columns: 1.2fr 0.8fr 1fr 0.9fr auto;
+  gap: 8px;
+  align-items: end;
+}
+@media (max-width: 720px) {
+  .pilot-condition-row {
+    grid-template-columns: 1fr;
+  }
+  .pilot-workspace .view-switch {
+    display: flex;
+    flex-wrap: wrap;
+  }
+}

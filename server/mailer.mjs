@@ -4,10 +4,12 @@ import { loadEnv } from "./env.mjs";
 loadEnv();
 
 export function alertEmail() {
+  loadEnv();
   return (process.env.ALERT_TO || "").trim();
 }
 
 export function smtpConfigured() {
+  loadEnv();
   return Boolean(
     process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS,
   );

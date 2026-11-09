@@ -1,4 +1,5 @@
 // server/apiHandler.mjs
+import crypto from "node:crypto";
 import { URL } from "node:url";
 import {
   getBars,
@@ -8,13 +9,16 @@ import {
   INSTRUMENT_MAP,
 } from "./yahooService.mjs";
 
+const ALLOWED_HEADERS =
+  "Content-Type, Authorization, X-Pilot-Role, X-Pilot-Actor, X-Pilot-Token";
+
 function sendJson(res, data, status = 200) {
   const body = JSON.stringify(data);
   res.writeHead(status, {
     "Content-Type": "application/json; charset=utf-8",
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+    "Access-Control-Allow-Headers": ALLOWED_HEADERS,
     "Cache-Control": "no-cache",
   });
   res.end(body);
@@ -77,6 +81,64 @@ async function handleDesk(req, res, parsed) {
   return false;
 }
 
+async function handlePilot(req, res, parsed) {
+  const pilot = await import("./pilotService.mjs");
+  const actor = pilot.extractActorContext(req);
+  const pathname = parsed.pathname.replace(/\/$/, "") || "/";
+
+  if (req.method === "GET" && pathname === "/api/health/monitoring") {
+    sendJson(res, pilot.getPilotHealth(actor));
+    return true;
+  }
+  if (req.method === "GET" && pathname === "/api/pilot/overview") {
+    sendJson(res, pilot.getPilotOverview(actor));
+    return true;
+  }
+  if (req.method === "POST" && pathname === "/api/pilot/observations") {
+    const body = await readJson(req);
+    sendJson(res, pilot.capturePilotObservation(body, actor));
+    return true;
+  }
+  if (req.method === "POST" && pathname === "/api/pilot/rules") {
+    const body = await readJson(req);
+    sendJson(res, pilot.savePilotRuleVersion(body, actor));
+    return true;
+  }
+  if (req.method === "POST" && pathname === "/api/pilot/rules/activate") {
+    const body = await readJson(req);
+    sendJson(res, pilot.activatePilotRule(body, actor));
+    return true;
+  }
+  if (req.method === "POST" && pathname === "/api/pilot/rules/pause") {
+    const body = await readJson(req);
+    sendJson(res, pilot.pausePilotRule(body, actor));
+    return true;
+  }
+  if (req.method === "POST" && pathname === "/api/pilot/test-runs") {
+    const body = await readJson(req);
+    sendJson(res, pilot.runPilotRuleTests(body, actor));
+    return true;
+  }
+  if (req.method === "POST" && pathname === "/api/pilot/evaluate") {
+    sendJson(res, await pilot.pilotWorkerTick({ actorCtx: actor }));
+    return true;
+  }
+  if (req.method === "POST" && pathname === "/api/pilot/notifications/retry") {
+    const body = await readJson(req);
+    sendJson(res, await pilot.retryPilotNotification(body, actor));
+    return true;
+  }
+  if (
+    req.method === "POST" &&
+    pathname === "/api/pilot/notifications/reconcile"
+  ) {
+    const body = await readJson(req);
+    sendJson(res, pilot.reconcilePilotNotification(body, actor));
+    return true;
+  }
+  return false;
+}
+
 function sendError(res, message, status = 503) {
   sendJson(
     res,
@@ -112,7 +174,7 @@ export async function handleApiRequest(req, res) {
     res.writeHead(204, {
       "Access-Control-Allow-Origin": "*",
       "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type, Authorization",
+      "Access-Control-Allow-Headers": ALLOWED_HEADERS,
     });
     res.end();
     return true;
@@ -133,6 +195,32 @@ export async function handleApiRequest(req, res) {
         isoTime: new Date().toISOString(),
       });
       return true;
+    }
+
+    if (
+      pathname === "/api/health/monitoring" ||
+      pathname === "/api/health/monitoring/" ||
+      pathname.startsWith("/api/pilot/")
+    ) {
+      try {
+        return await handlePilot(req, res, parsed);
+      } catch (error) {
+        const status = typeof error?.status === "number" ? error.status : 400;
+        const code =
+          typeof error?.code === "string" ? error.code : "PILOT_REQUEST_ERROR";
+        sendJson(
+          res,
+          {
+            success: false,
+            code,
+            error:
+              error instanceof Error ? error.message : "Pilot request failed.",
+            correlationId: crypto.randomUUID(),
+          },
+          status,
+        );
+        return true;
+      }
     }
 
     // List Instruments with current quotes
