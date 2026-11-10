@@ -18,10 +18,10 @@ test.beforeEach(async ({ page }) => {
   );
 });
 
-test("provider failure is unavailable until demo data is selected explicitly", async ({
+test("provider failure is unavailable until sample data is selected explicitly", async ({
   page,
 }) => {
-  await page.goto("/");
+  await page.goto("/?view=market");
   await expect(
     page.getByRole("combobox", { name: "Market data", exact: true }),
   ).toHaveValue("yahoo");
@@ -60,7 +60,7 @@ test("provider failure is unavailable until demo data is selected explicitly", a
     .selectOption("demo");
   await expect(page.locator(".chart-canvas")).toBeVisible();
   await expect(page.getByLabel("Chart provenance")).toContainText(
-    "Demo sample · synthetic",
+    "Sample sample · synthetic",
   );
 });
 
@@ -70,7 +70,7 @@ test("observed bars show source time separately from fetch time and hide sample 
   await page.route("**/api/bars?**", (route) =>
     route.fulfill({ json: bars() }),
   );
-  await page.goto("/");
+  await page.goto("/?view=market");
   await expect(page.locator(".chart-canvas")).toBeVisible();
   const provenance = page.getByLabel("Chart provenance");
   await expect(provenance).toContainText("Yahoo Finance snapshot");

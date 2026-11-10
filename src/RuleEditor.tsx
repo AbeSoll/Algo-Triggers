@@ -303,7 +303,7 @@ export default function RuleEditor({
             )}
 
             <p className="hint">
-              Saved as a draft. Rule tests and demo monitoring use synthetic
+              Saved as a draft. Rule tests and sample monitoring use synthetic
               samples, independently of the market display source.
             </p>
             {/* Essential Fields */}

@@ -18,18 +18,8 @@ export class PilotHttpError extends Error {
   }
 }
 
-const ROLE_PERMISSIONS = {
-  read: ["viewer", "trader", "approver", "support", "admin"],
-  configure: ["trader", "approver", "admin"],
-  approve: ["approver", "admin"],
-  operate: ["support", "approver", "admin"],
-};
-
 export function extractActorContext(req) {
   const headers = req?.headers ?? {};
-  const roleHeader = String(headers["x-pilot-role"] || "trader")
-    .trim()
-    .toLowerCase();
   const actorHeader = String(headers["x-pilot-actor"] || "").trim();
   const authHeader = String(headers.authorization || "").trim();
   const token = authHeader.startsWith("Bearer ")
@@ -37,8 +27,8 @@ export function extractActorContext(req) {
     : String(headers["x-pilot-token"] || "").trim();
 
   return {
-    role: roleHeader || "trader",
-    actor: actorHeader || `${roleHeader || "trader"}-session`,
+    role: "team_member",
+    actor: actorHeader || "team-member",
     token,
   };
 }
@@ -54,7 +44,7 @@ export function recordAudit(
   ).run(
     crypto.randomUUID(),
     String(actor || "anonymous").slice(0, 80),
-    String(role || "unknown").slice(0, 40),
+    role === "system" ? "system" : "team_member",
     action,
     String(target || "system").slice(0, 140),
     outcome,
@@ -65,7 +55,7 @@ export function recordAudit(
 
 export function authorizePilot(
   permission,
-  actorCtx = { actor: "local-pilot", role: "admin", token: "" },
+  actorCtx = { actor: "team-member", role: "team_member", token: "" },
   target = "pilot",
 ) {
   const db = openDb();
@@ -83,24 +73,7 @@ export function authorizePilot(
     throw new PilotHttpError(
       401,
       "UNAUTHENTICATED",
-      "Authentication is required to access HedgeSignal pilot resources.",
-    );
-  }
-
-  const allowedRoles = ROLE_PERMISSIONS[permission] || [];
-  if (!allowedRoles.includes(actorCtx.role)) {
-    recordAudit(db, {
-      actor: actorCtx.actor,
-      role: actorCtx.role,
-      action: `PERM_${permission.toUpperCase()}`,
-      target,
-      outcome: "DENIED",
-      details: `Role "${actorCtx.role}" lacks "${permission}" permission (requires ${allowedRoles.join(", ")}).`,
-    });
-    throw new PilotHttpError(
-      403,
-      "FORBIDDEN",
-      `Role "${actorCtx.role}" is not authorised for "${permission}" operations (requires ${allowedRoles.join(" or ")}).`,
+      "Authentication is required to access HedgeSignal resources.",
     );
   }
 }
@@ -160,7 +133,7 @@ function formatPilotEmail({
 
 export function capturePilotObservation(
   payload,
-  actorCtx = { actor: "trader-local", role: "trader", token: "" },
+  actorCtx = { actor: "team-member", role: "team_member", token: "" },
 ) {
   authorizePilot(
     "configure",
@@ -256,7 +229,7 @@ export function capturePilotObservation(
 
 export function savePilotRuleVersion(
   { ruleId, name, definition },
-  actorCtx = { actor: "trader-local", role: "trader", token: "" },
+  actorCtx = { actor: "team-member", role: "team_member", token: "" },
 ) {
   authorizePilot("configure", actorCtx, ruleId || "new-rule");
   const normalizedDef = {
@@ -364,9 +337,9 @@ export function savePilotRuleVersion(
 
 export function activatePilotRule(
   { ruleId, expectedVersion },
-  actorCtx = { actor: "approver-local", role: "approver", token: "" },
+  actorCtx = { actor: "team-member", role: "team_member", token: "" },
 ) {
-  authorizePilot("approve", actorCtx, `${ruleId}:v${expectedVersion}`);
+  authorizePilot("configure", actorCtx, `${ruleId}:v${expectedVersion}`);
   const db = openDb();
   const rule = db
     .prepare("SELECT * FROM pilot_rules WHERE id = ?")
@@ -445,9 +418,9 @@ export function activatePilotRule(
 
 export function pausePilotRule(
   { ruleId },
-  actorCtx = { actor: "approver-local", role: "approver", token: "" },
+  actorCtx = { actor: "team-member", role: "team_member", token: "" },
 ) {
-  authorizePilot("approve", actorCtx, String(ruleId || ""));
+  authorizePilot("configure", actorCtx, String(ruleId || ""));
   const db = openDb();
   const rule = db
     .prepare("SELECT * FROM pilot_rules WHERE id = ?")
@@ -479,7 +452,7 @@ export function pausePilotRule(
 
 export function runPilotRuleTests(
   { ruleId, version },
-  actorCtx = { actor: "trader-local", role: "trader", token: "" },
+  actorCtx = { actor: "team-member", role: "team_member", token: "" },
 ) {
   authorizePilot("configure", actorCtx, `${ruleId}:v${version || "latest"}`);
   const db = openDb();
@@ -819,7 +792,7 @@ export async function processPilotOutbox(sendFn = deliver) {
 
 export async function retryPilotNotification(
   { intentId },
-  actorCtx = { actor: "support-local", role: "support", token: "" },
+  actorCtx = { actor: "team-member", role: "team_member", token: "" },
   sendFn = deliver,
 ) {
   authorizePilot("operate", actorCtx, String(intentId || ""));
@@ -864,7 +837,7 @@ export async function retryPilotNotification(
 
 export function reconcilePilotNotification(
   { intentId, resolution, note },
-  actorCtx = { actor: "support-local", role: "support", token: "" },
+  actorCtx = { actor: "team-member", role: "team_member", token: "" },
 ) {
   authorizePilot("operate", actorCtx, String(intentId || ""));
   const db = openDb();

@@ -13,7 +13,7 @@ test.beforeEach(async ({ page }) => {
 test("a rule can be saved from a template without a description or advanced settings", async ({
   page,
 }) => {
-  await page.goto("/");
+  await page.goto("/?view=market");
   await page.getByRole("button", { name: "Create rule", exact: true }).click();
   const editor = page.getByRole("dialog");
   await expect(
@@ -70,7 +70,7 @@ test("a rule can be saved from a template without a description or advanced sett
 test("templates and optional descriptions preserve extra conditions and advanced errors remain reachable", async ({
   page,
 }) => {
-  await page.goto("/");
+  await page.goto("/?view=market");
   await page.getByRole("button", { name: "Create rule", exact: true }).click();
   const editor = page.getByRole("dialog");
   await editor.getByText("Advanced settings", { exact: true }).click();

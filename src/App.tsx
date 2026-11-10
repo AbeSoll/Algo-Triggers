@@ -59,6 +59,7 @@ const OptionsLab = lazy(() => import("./OptionsLab"));
 const PilotDesk = lazy(() => import("./PilotDesk"));
 type View = "market" | "rules" | "options" | "history" | "pilot";
 import { DEMO_ONLY } from "./deployment";
+import { fetchWorkspace, pushWorkspace } from "./workspaceSync";
 
 type Store = {
   schema: number;
@@ -75,7 +76,9 @@ const KEY = "algo-triggers-demo-v1";
 
 async function postDesk(path: string, body?: unknown) {
   if (DEMO_ONLY)
-    throw new Error("Email and live monitoring are unavailable in this demo.");
+    throw new Error(
+      "Email and live monitoring are unavailable in this sample.",
+    );
   const response = await fetch(path, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -131,11 +134,11 @@ function readStore(): Store {
       )
         return saved;
       recovery =
-        "Saved data has an incompatible format. Reset local demo data to recover a writable sample workspace.";
+        "Saved data has an incompatible format. Reset local sample data to recover a writable sample workspace.";
     }
   } catch {
     recovery =
-      "Saved browser data could not be read. Reset local demo data to recover. The sample view remains available.";
+      "Saved browser data could not be read. Reset local sample data to recover. The sample view remains available.";
   }
   return {
     schema: 1,
@@ -228,7 +231,7 @@ const names: Record<View, string> = {
   rules: "Rules & alerts",
   options: "Options lab",
   history: "Event history",
-  pilot: "HedgeSignal pilot",
+  pilot: "HedgeSignal",
 };
 export default function App() {
   const [store, setStore] = useState<Store>(readStore);
@@ -236,7 +239,7 @@ export default function App() {
   storeRef.current = store;
   const [view, setView] = useState<View>(() => {
     const v = new URLSearchParams(location.search).get("view");
-    return isView(v) ? v : "market";
+    return isView(v) ? v : "pilot";
   });
   const [instrument, setInstrument] = useState("brent-dec26");
   const [timeframe, setTimeframe] = useState<"5m" | "15m" | "1h">("5m");
@@ -435,6 +438,19 @@ export default function App() {
       storeRef.current = updated;
       setStore(updated);
       setStorageError("");
+      if (!DEMO_ONLY)
+        void pushWorkspace(updated.revision, updated).then((result) => {
+          if (result === "failed")
+            setStorageError(
+              "Saved in this browser, but the server copy was not updated. Check that the HedgeSignal server is running.",
+            );
+          if (result === "conflict") {
+            setConflict(true);
+            setStorageError(
+              "The server holds a newer workspace. Reload before making changes.",
+            );
+          }
+        });
       return true;
     } catch {
       setStorageError(
@@ -453,12 +469,45 @@ export default function App() {
     history.pushState({}, "", url);
   }, []);
   useEffect(() => {
-    document.title = `${names[view]} · Algo Triggers`;
+    document.title = `${names[view]} · HedgeSignal`;
   }, [view]);
+  useEffect(() => {
+    if (DEMO_ONLY) return;
+    let stop = false;
+    void fetchWorkspace().then((server) => {
+      if (stop || !server?.enabled) return;
+      const local = storeRef.current;
+      if (local.recovery) return;
+      const saved = server.store as Store | null;
+      if (
+        saved &&
+        server.revision > local.revision &&
+        saved.schema === 1 &&
+        Array.isArray(saved.rules) &&
+        saved.rules.every(validRule) &&
+        Array.isArray(saved.events) &&
+        saved.events.every(validEvent) &&
+        Array.isArray(saved.runs)
+      ) {
+        try {
+          localStorage.setItem(KEY, JSON.stringify(saved));
+        } catch {
+          /* keep the server copy in memory only */
+        }
+        storeRef.current = saved;
+        setStore(saved);
+      } else if (local.revision > server.revision) {
+        void pushWorkspace(local.revision, local);
+      }
+    });
+    return () => {
+      stop = true;
+    };
+  }, []);
   useEffect(() => {
     const listener = () => {
       const v = new URLSearchParams(location.search).get("view");
-      setView(isView(v) ? v : "market");
+      setView(isView(v) ? v : "pilot");
       setQuery(new URLSearchParams(location.search).get("q") ?? "");
       setPage(1);
     };
@@ -551,13 +600,13 @@ export default function App() {
     ) {
       setNotice(
         next === "monitoring"
-          ? "Demo monitoring started in this browser."
-          : "Demo monitoring paused.",
+          ? "Sample monitoring started in this browser."
+          : "Sample monitoring paused.",
       );
       if (DEMO_ONLY) {
         setNotice(
           next === "monitoring"
-            ? "Sample monitoring started. Press Advance demo bar to evaluate the next sample. No email is sent."
+            ? "Sample monitoring started. Press Advance sample bar to evaluate the next sample. No email is sent."
             : "Sample monitoring paused.",
         );
         return;
@@ -650,7 +699,7 @@ export default function App() {
     ) {
       setDemoIndex((i) => (i >= 719 ? 600 : i + 1));
       setNotice(
-        `${newEvents.length ? `${newEvents.length} demo event recorded` : "No new crossing"} at ${timestamp(generateBars(instrument, "5m")[demoIndex].time)} UTC. This is a manually stepped sample, not a live feed.`,
+        `${newEvents.length ? `${newEvents.length} sample event recorded` : "No new crossing"} at ${timestamp(generateBars(instrument, "5m")[demoIndex].time)} UTC. This is a manually stepped sample, not a live feed.`,
       );
     }
   }
@@ -716,7 +765,7 @@ export default function App() {
       <div className="table-wrap">
         <table className="rules-table">
           <caption className="sr-only">
-            Saved rule versions and demo monitoring status
+            Saved rule versions and sample monitoring status
           </caption>
           <thead>
             <tr>
@@ -752,7 +801,7 @@ export default function App() {
                       className={`dot ${rule.status === "monitoring" ? "green" : "gray"}`}
                     />
                     {rule.status === "monitoring"
-                      ? "Demo monitoring"
+                      ? "Sample monitoring"
                       : rule.status === "paused"
                         ? "Paused"
                         : "Draft"}
@@ -781,13 +830,13 @@ export default function App() {
                       </button>
                       <button
                         className="btn btn-outline btn-small"
-                        aria-label={`${rule.status === "monitoring" ? "Pause" : "Start demo monitoring for"} ${rule.name}`}
+                        aria-label={`${rule.status === "monitoring" ? "Pause" : "Start sample monitoring for"} ${rule.name}`}
                         onClick={() => status(rule)}
                         title={
                           DEMO_ONLY
-                            ? "Sample monitoring only. Use Advance demo bar; no email is sent."
+                            ? "Sample monitoring only. Use Advance sample bar; no email is sent."
                             : rule.status === "monitoring"
-                              ? "Pause the demo and the email watch"
+                              ? "Pause the sample and the email watch"
                               : "Watch Yahoo prices and email a new hit"
                         }
                       >
@@ -798,7 +847,7 @@ export default function App() {
                         )}
                         {rule.status === "monitoring"
                           ? "Pause"
-                          : "Monitor demo"}
+                          : "Monitor sample"}
                       </button>
                     </div>
                     {!compact && (
@@ -861,7 +910,7 @@ export default function App() {
               <span className="event-description">
                 {event.mode === "historical"
                   ? "Historical replay"
-                  : "Manual demo"}{" "}
+                  : "Manual playback"}{" "}
                 · v{event.ruleVersion} · ${money(event.price)}/bbl
               </span>
             </span>
@@ -874,7 +923,7 @@ export default function App() {
       </div>
     ) : (
       <Empty title="No events to show">
-        Run a replay or step an active demo rule to inspect its evidence.
+        Run a replay or step an active sample rule to inspect its evidence.
       </Empty>
     );
   }
@@ -884,38 +933,39 @@ export default function App() {
         Skip to workspace
       </a>
       <aside className="sidebar">
-        <a className="brand" {...setViewLink("market")}>
+        <a className="brand" {...setViewLink("pilot")}>
           <span className="brand-symbol">
             <i />
             <i />
             <i />
           </span>
           <span>
-            algo<span className="brand-light">triggers</span>
-            <small>RESEARCH TERMINAL</small>
+            hedge<span className="brand-light">signal</span>
+            <small>HEDGING ALERT DESK</small>
           </span>
         </a>
-        <div className="workspace-label">WORKSPACE</div>
+        <div className="workspace-label">HEDGING DESK</div>
         <nav aria-label="Main navigation">
-          <a {...setViewLink("market")}>
-            <LayoutDashboard size={18} />
-            Market explorer
+          <a {...setViewLink("pilot")}>
+            <ShieldCheck size={18} />
+            HedgeSignal
           </a>
+          <div className="workspace-label secondary-label">RESEARCH TOOLS</div>
           <a {...setViewLink("rules")}>
             <SlidersHorizontal size={18} />
             Rules & alerts<span className="nav-count">{rules.length}</span>
-          </a>
-          <a {...setViewLink("options")}>
-            <FlaskConical size={18} />
-            Options lab
           </a>
           <a {...setViewLink("history")}>
             <History size={18} />
             Event history
           </a>
-          <a {...setViewLink("pilot")}>
-            <ShieldCheck size={18} />
-            HedgeSignal pilot
+          <a {...setViewLink("market")}>
+            <LayoutDashboard size={18} />
+            Market explorer
+          </a>
+          <a {...setViewLink("options")}>
+            <FlaskConical size={18} />
+            Options lab
           </a>
         </nav>
         <div className="sidebar-divider" />
@@ -935,12 +985,18 @@ export default function App() {
               <Activity size={18} />
             </span>
             <strong>
-              {DEMO_ONLY ? "Presentation demo" : "Market snapshots"}
+              {view === "pilot"
+                ? "Shared team workspace"
+                : DEMO_ONLY
+                  ? "Sample data workspace"
+                  : "Market snapshots"}
             </strong>
             <p>
-              {DEMO_ONLY
-                ? "Synthetic market samples. Rules and results stay in this browser. No live feed or email delivery."
-                : "Yahoo observations or explicitly selected demo samples. Rule tests and monitoring use synthetic data."}
+              {view === "pilot"
+                ? "Configure, test and monitor scenarios. Check the desk for data source, service and email status."
+                : DEMO_ONLY
+                  ? "Synthetic market samples. Rules and results stay in this browser. No live feed or email delivery."
+                  : "Yahoo observations or explicitly selected synthetic samples. Rule tests and monitoring use synthetic data."}
             </p>
             <span className="side-demo-badge">No automatic trading</span>
           </div>
@@ -951,7 +1007,12 @@ export default function App() {
           <div className="user-chip">
             <span>AS</span>
             <div>
-              Analyst workspace<small>Saved on this browser</small>
+              Team workspace
+              <small>
+                {view === "pilot"
+                  ? "Service status shown on desk"
+                  : "Research tools"}
+              </small>
             </div>
             <button
               className="icon-button"
@@ -966,12 +1027,14 @@ export default function App() {
       <div className="main-shell">
         <header className="topbar">
           <div className="topbar-crumb">
-            <span>Research workspace</span>
+            <span>
+              {view === "pilot" ? "Team workspace" : "Research workspace"}
+            </span>
             <ChevronRight size={13} />
             <strong>Brent crude</strong>
           </div>
           <div className="topbar-right">
-            <label className="source-select">
+            <label className="source-select" hidden={view === "pilot"}>
               Market data
               <select
                 value={dataMode}
@@ -990,7 +1053,7 @@ export default function App() {
                 }}
               >
                 {!DEMO_ONLY && <option value="yahoo">Yahoo snapshots</option>}
-                <option value="demo">Demo samples</option>
+                <option value="demo">Synthetic samples</option>
               </select>
             </label>
             <button
@@ -1002,6 +1065,7 @@ export default function App() {
             </button>
             <button
               className="icon-button"
+              hidden={view === "pilot"}
               aria-label="Open event history"
               onClick={() => navigate("history")}
             >
@@ -1015,9 +1079,9 @@ export default function App() {
             <aside
               className="data-source-notice"
               id="hosted-demo-note"
-              aria-label="Presentation demo"
+              aria-label="Sample data workspace"
             >
-              <strong>Presentation demo · synthetic data</strong>
+              <strong>Sample data workspace · synthetic data</strong>
               <span>
                 Create a rule, run a sample test, then inspect an event. Saved
                 work stays in this browser. Live prices and email alerts are
@@ -1027,7 +1091,11 @@ export default function App() {
           )}
           <div className="page-heading">
             <div>
-              <div className="eyebrow">BRENT RESEARCH · SNAPSHOTS & DEMO</div>
+              <div className="eyebrow">
+                {view === "pilot"
+                  ? "HEDGESIGNAL · TEAM WORKSPACE"
+                  : "BRENT RESEARCH · MARKET DATA"}
+              </div>
               <h1>
                 {names[view]}
                 <span className="heading-dot">.</span>
@@ -1040,11 +1108,15 @@ export default function App() {
                     : view === "options"
                       ? "See the structure behind premiums, exposures and volatility."
                       : view === "pilot"
-                        ? "Auditable hedging triggers, 4-valued evaluations and controlled email alerts."
+                        ? "Configure conditions, monitor results and inspect email alerts."
                         : "Every signal has a story. Inspect the values behind it."}
               </p>
             </div>
-            <button className="btn btn-primary" onClick={() => create()}>
+            <button
+              hidden={view === "pilot"}
+              className="btn btn-primary"
+              onClick={() => create()}
+            >
               <Plus size={17} />
               Create rule
             </button>
@@ -1067,7 +1139,7 @@ export default function App() {
             <div className="error-message" role="alert">
               {store.recovery}{" "}
               <button className="text-button" onClick={() => setReset(true)}>
-                Reset local demo data
+                Reset local sample data
               </button>
             </div>
           )}
@@ -1161,7 +1233,7 @@ export default function App() {
               {selectedEvent && (
                 <p className="notice">
                   Viewing synthetic event evidence. This chart uses the original
-                  demo dataset.
+                  sample dataset.
                   <button
                     className="text-button"
                     onClick={() => setSelectedEvent(null)}
@@ -1206,7 +1278,7 @@ export default function App() {
                         }
                         title={
                           DEMO_ONLY
-                            ? "Live refresh is unavailable in this sample demo."
+                            ? "Live refresh is unavailable in this sample sample."
                             : "Refresh the selected Yahoo snapshot"
                         }
                       >
@@ -1292,13 +1364,13 @@ export default function App() {
                       }
                     >
                       {health === "stale"
-                        ? "This demonstration state pauses new evaluations. No stale values are treated as current."
+                        ? "This sample state pauses new evaluations. No stale values are treated as current."
                         : "The sample data view is disabled. Choose Healthy in workspace settings to restore it."}
                       <button
                         className="btn btn-outline"
                         onClick={() => setHealth("healthy")}
                       >
-                        Restore demo data
+                        Restore sample data
                       </button>
                     </Empty>
                   ) : chartTab === "price" && !bars.length ? (
@@ -1311,7 +1383,7 @@ export default function App() {
                     >
                       {isLiveLoading
                         ? "Requesting the selected contract from Yahoo Finance."
-                        : `${barError || "No observed bars returned."} Retry, or explicitly select Demo samples to explore sample data.`}
+                        : `${barError || "No observed bars returned."} Retry, or explicitly select Synthetic samples to explore sample data.`}
                       <button
                         className="btn btn-outline"
                         disabled={isLiveLoading}
@@ -1409,7 +1481,7 @@ export default function App() {
                       <span className="monitor-icon">
                         <Radio size={18} />
                       </span>
-                      <strong>{activeCount} demo rules enabled</strong>
+                      <strong>{activeCount} sample rules enabled</strong>
                     </div>
                     <p>
                       Step through a sample bar and inspect what your rules
@@ -1420,7 +1492,7 @@ export default function App() {
                       onClick={advance}
                       disabled={!activeCount || health !== "healthy"}
                     >
-                      Advance demo bar <ArrowRight size={14} />
+                      Advance sample bar <ArrowRight size={14} />
                     </button>
                     <small>Manual playback · browser only</small>
                   </section>
@@ -1475,7 +1547,7 @@ export default function App() {
                   </strong>
                 </div>
                 <div>
-                  <span className="small muted">MANUAL DEMO</span>
+                  <span className="small muted">MANUAL PLAYBACK</span>
                   <strong>
                     {activeCount}
                     <small>enabled</small>
@@ -1503,8 +1575,8 @@ export default function App() {
                     <h2>Saved rules & versions</h2>
                     <p>
                       {DEMO_ONLY
-                        ? "Test rules on sample history, or use Monitor demo and Advance demo bar for manual playback. No email is sent. Earlier versions stay intact."
-                        : "Press Monitor demo. A new Yahoo hit emails your configured inbox. Earlier versions stay intact, and sample bars still step here."}
+                        ? "Test rules on sample history, or use Monitor sample and Advance sample bar for manual playback. No email is sent. Earlier versions stay intact."
+                        : "Press Monitor sample. A new Yahoo hit emails your configured inbox. Earlier versions stay intact, and sample bars still step here."}
                     </p>
                   </div>
                   <div className="desk-actions">
@@ -1514,7 +1586,7 @@ export default function App() {
                       disabled={!activeCount || health !== "healthy"}
                     >
                       <Play size={14} />
-                      Advance demo bar
+                      Advance sample bar
                     </button>
                     <button
                       className="btn btn-outline"
@@ -1573,7 +1645,7 @@ export default function App() {
                       }}
                     >
                       <option value="all">All statuses</option>
-                      <option value="monitoring">Demo monitoring</option>
+                      <option value="monitoring">Sample monitoring</option>
                       <option value="paused">Paused</option>
                       <option value="draft">Draft</option>
                     </select>
@@ -1657,7 +1729,7 @@ export default function App() {
                       className="btn btn-outline"
                       onClick={() => setHealth("healthy")}
                     >
-                      Restore demo data
+                      Restore sample data
                     </button>
                   </Empty>
                 </section>
@@ -1710,7 +1782,7 @@ export default function App() {
                   >
                     <option value="all">All event modes</option>
                     <option value="historical">Historical replay</option>
-                    <option value="demo">Manual demo</option>
+                    <option value="demo">Manual playback</option>
                   </select>
                 </label>
               </div>
@@ -1728,7 +1800,7 @@ export default function App() {
               fallback={
                 <div className="empty">
                   <Loader2 className="spinner" />
-                  Loading HedgeSignal pilot…
+                  Loading HedgeSignal…
                 </div>
               }
             >
@@ -1738,8 +1810,9 @@ export default function App() {
           <footer className="workspace-footer">
             <span>
               <FlaskConical size={13} />
-              Research workspace · rule tests and monitoring use synthetic
-              samples · no order execution
+              {view === "pilot"
+                ? "HedgeSignal · monitoring and email alerts · no order execution"
+                : "Research workspace · sample replay and observed chart data are separate"}
             </span>
             <button className="text-button" onClick={() => setHelp(true)}>
               Data & methodology <ArrowUpRight size={12} />
@@ -1777,7 +1850,7 @@ export default function App() {
             <span className="badge badge-purple">
               {detail.mode === "historical"
                 ? "Historical replay"
-                : "Manual demo"}
+                : "Manual playback"}
             </span>
             <h3>
               {detail.ruleName} <small>v{detail.ruleVersion}</small>
@@ -2003,7 +2076,7 @@ export default function App() {
                 <p>
                   {DEMO_ONLY
                     ? "Explore synthetic futures. Candles and SMA/EMA overlays use the same sample bars as replay."
-                    : "Explore Yahoo snapshots or synthetic demo futures. Candles and SMA/EMA overlays use the same sample bars as replay."}
+                    : "Explore Yahoo snapshots or synthetic sample futures. Candles and SMA/EMA overlays use the same sample bars as replay."}
                 </p>
               </section>
             </div>
@@ -2030,12 +2103,12 @@ export default function App() {
             </div>
           </div>
           <p className="notice">
-            Market pages offer Yahoo snapshots or explicit demo samples. Yahoo
-            availability and delay are unverified; BNO/USO are oil funds, not
-            ICE futures options. Demo data and all rule tests use 12–16 October
-            2026 synthetic bars. No licensed ICE feed is connected. Demo
-            monitoring advances only when you press Advance demo bar and stops
-            when this browser closes.
+            Market pages offer Yahoo snapshots or explicit synthetic samples.
+            Yahoo availability and delay are unverified; BNO/USO are oil funds,
+            not ICE futures options. Sample data and all rule tests use 12–16
+            October 2026 synthetic bars. No licensed ICE feed is connected.
+            Sample monitoring advances only when you press Advance sample bar
+            and stops when this browser closes.
           </p>
           <button className="btn btn-primary" onClick={() => setHelp(false)}>
             Back to research <ArrowRight size={15} />
@@ -2045,7 +2118,7 @@ export default function App() {
       {settings && (
         <Modal title="Workspace settings" onClose={() => setSettings(false)}>
           <label className="field">
-            Demo data health
+            Sample data health
             <select
               value={health}
               disabled={dataMode !== "demo"}
@@ -2072,13 +2145,13 @@ export default function App() {
             </div>
           </div>
           <button className="btn btn-danger" onClick={() => setReset(true)}>
-            Reset local demo data
+            Reset local sample data
           </button>
         </Modal>
       )}
       {reset && (
         <Modal
-          title="Reset this demo workspace?"
+          title="Reset this sample workspace?"
           onClose={() => setReset(false)}
         >
           <p>
@@ -2105,7 +2178,7 @@ export default function App() {
                 }
               }}
             >
-              Reset demo data
+              Reset sample data
             </button>
           </div>
         </Modal>

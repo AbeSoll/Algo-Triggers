@@ -216,17 +216,15 @@ describe("HedgeSignal pilot service & API (SRS v0.2)", () => {
     expect(afterPause.status).toBe("PAUSED");
   });
 
-  it("enforces server-side authentication and role permissions with audit trail (TC-010)", async () => {
-    // Unauthorised role (trader trying to activate) -> 403 + audited
-    const forbidden = await invokeApi({
+  it("allows the shared team workflow and retains optional token protection with audit trail (TC-010)", async () => {
+    // Same actor may configure and activate; supplied legacy role has no authority.
+    const allowed = await invokeApi({
       method: "POST",
       url: "/api/pilot/rules/activate",
-      headers: { "x-pilot-role": "trader", "x-pilot-actor": "trader-alice" },
+      headers: { "x-pilot-role": "viewer", "x-pilot-actor": "team-alice" },
       body: { ruleId: "pilot-rule-br-ex-01", expectedVersion: 1 },
     });
-    expect(forbidden.status).toBe(403);
-    expect(forbidden.json.code).toBe("FORBIDDEN");
-
+    expect(allowed.status).toBe(200);
     // Strict token enforcement when PILOT_TOKEN is configured -> 401
     process.env.PILOT_TOKEN = "secret-pilot-token";
     const unauth = await invokeApi({
@@ -248,7 +246,7 @@ describe("HedgeSignal pilot service & API (SRS v0.2)", () => {
     expect(authed.status).toBe(200);
     expect(
       authed.json.audit.some(
-        (entry) => entry.outcome === "DENIED" && entry.actor === "trader-alice",
+        (entry) => entry.outcome === "DENIED" && entry.role === "team_member",
       ),
     ).toBe(true);
   });

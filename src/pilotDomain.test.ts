@@ -11,7 +11,7 @@ import {
   type PilotRuleDefinition,
 } from "./pilotDomain";
 
-describe("HedgeSignal pilot domain (SRS v0.2)", () => {
+describe("HedgeSignal domain (SRS v0.2)", () => {
   it("compares exact decimals without binary floating-point rounding (NFR-001)", () => {
     expect(normalizeDecimal("0075.00")).toBe("75.00");
     expect(normalizeDecimal("-0.00")).toBe("0.00");

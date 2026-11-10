@@ -272,7 +272,7 @@ export function parseIdea(
   if (/\b(and|or)\b/.test(normalized)) {
     return {
       error:
-        "This demo parser supports one condition at a time. Add conditions in the structured builder and choose AND or OR explicitly.",
+        "This sample parser supports one condition at a time. Add conditions in the structured builder and choose AND or OR explicitly.",
     };
   }
   const cleaned = normalized.replace(
@@ -313,7 +313,8 @@ export function parseIdea(
   if (average) {
     if (average[1] !== average[4])
       return {
-        error: "Use the same indicator family for both averages in this demo.",
+        error:
+          "Use the same indicator family for both averages in this sample.",
       };
     if (Number(average[2]) >= Number(average[5]))
       return {

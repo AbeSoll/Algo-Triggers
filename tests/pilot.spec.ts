@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 
-test("HedgeSignal SRS v0.2 end-to-end pilot workflow, role gate, version evidence and accessibility", async ({
+test("HedgeSignal v0.3 team workflow, version evidence and accessibility", async ({
   page,
 }) => {
   const uniqueName = `Brent pilot guard ${Date.now()}`;
@@ -20,13 +20,11 @@ test("HedgeSignal SRS v0.2 end-to-end pilot workflow, role gate, version evidenc
 
   await page.goto("/?view=pilot");
   await expect(
-    page.getByRole("heading", { name: "HedgeSignal pilot." }),
+    page.getByRole("heading", { name: "HedgeSignal." }),
   ).toBeVisible();
 
   // UC-03: Create a fresh versioned pilot scenario
-  await page
-    .getByRole("button", { name: "New pilot scenario", exact: true })
-    .click();
+  await page.getByRole("button", { name: "New scenario", exact: true }).click();
   const createModal = page.getByRole("dialog");
   await createModal.getByLabel("Scenario / rule name").fill(uniqueName);
   await expect(createModal.locator(".rule-live-card")).toContainText(
@@ -38,7 +36,7 @@ test("HedgeSignal SRS v0.2 end-to-end pilot workflow, role gate, version evidenc
   await expect(page.getByRole("dialog")).toHaveCount(0);
 
   const ruleGroup = page.getByRole("group", {
-    name: `Pilot actions for ${uniqueName}`,
+    name: `Scenario actions for ${uniqueName}`,
   });
   await expect(ruleGroup).toBeVisible();
 
@@ -51,20 +49,10 @@ test("HedgeSignal SRS v0.2 end-to-end pilot workflow, role gate, version evidenc
   await expect(testDialog).toContainText("NOT_EVALUABLE");
   await testDialog.getByRole("button", { name: "Close test report" }).click();
 
-  // TC-010: Switch to Trader / Analyst and verify activation is blocked & audited
-  await page
-    .getByRole("combobox", { name: "Pilot actor role", exact: true })
-    .selectOption("trader");
-  await ruleGroup.getByRole("button", { name: "Activate v1" }).click();
-  await expect(page.getByRole("alert")).toContainText("not authorised");
+  // One team member can test and activate without switching roles.
+  await expect(page.getByLabel("Pilot actor role")).toHaveCount(0);
 
-  // UC-05: Switch to Business Approver and activate v1
-  await page
-    .getByRole("combobox", { name: "Pilot actor role", exact: true })
-    .selectOption("approver");
-  await ruleGroup.getByRole("button", { name: "Activate v1" }).click();
-  await expect(page.getByRole("status")).toContainText("Activated");
-
+  await page.getByRole("button", { name: "Inputs", exact: true }).click();
   // TC-014 & UC-02: Reject mismatched unit, then record valid synthetic observation
   await page
     .getByRole("combobox", { name: "Unit", exact: true })
@@ -78,6 +66,10 @@ test("HedgeSignal SRS v0.2 end-to-end pilot workflow, role gate, version evidenc
   await page.getByLabel("Exact decimal value").fill("73.25");
   await page.getByRole("button", { name: "Record synthetic input" }).click();
   await expect(page.getByRole("status")).toContainText("73.25 USD/bbl");
+
+  await page.getByRole("button", { name: "Monitor", exact: true }).click();
+  await ruleGroup.getByRole("button", { name: "Activate v1" }).click();
+  await expect(page.getByRole("status")).toContainText("Activated");
 
   // UC-06: Evaluate active rules and emit durable event + email outbox intent
   await page.getByRole("button", { name: "Evaluate active rules" }).click();
@@ -93,6 +85,9 @@ test("HedgeSignal SRS v0.2 end-to-end pilot workflow, role gate, version evidenc
     .click();
   await expect(ruleRow).toContainText("v2");
 
+  await page
+    .getByRole("button", { name: "History & email", exact: true })
+    .click();
   const eventRow = page
     .getByRole("row")
     .filter({ hasText: uniqueName })
@@ -106,13 +101,17 @@ test("HedgeSignal SRS v0.2 end-to-end pilot workflow, role gate, version evidenc
     .getByRole("button", { name: "Close", exact: true })
     .click();
 
+  await page.getByRole("button", { name: "Monitor", exact: true }).click();
   // UC-09: Pause active rule
   await ruleGroup.getByRole("button", { name: "Pause" }).click();
   await expect(ruleRow).toContainText("PAUSED");
 
-  // Check Audit Trail records DENIED and ALLOWED actions
+  await page
+    .getByRole("button", { name: "History & email", exact: true })
+    .click();
+  // Check the shared team identity and activation audit
   await page.getByRole("button", { name: /Audit trail/ }).click();
-  await expect(page.locator("table").last()).toContainText("DENIED");
+  await expect(page.locator("table").last()).toContainText("team_member");
   await expect(page.locator("table").last()).toContainText("ACTIVATE_RULE");
 
   // WCAG 2.2 AA check & narrow mobile viewport overflow check (TC-015)

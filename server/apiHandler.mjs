@@ -197,6 +197,37 @@ export async function handleApiRequest(req, res) {
       return true;
     }
 
+    if (pathname === "/api/workspace") {
+      try {
+        const workspace = await import("./workspace.mjs");
+        if (req.method === "GET") {
+          sendJson(res, workspace.getWorkspace());
+          return true;
+        }
+        if (req.method === "POST") {
+          sendJson(res, workspace.saveWorkspace(await readJson(req)));
+          return true;
+        }
+        sendJson(res, { success: false, error: "Method not allowed." }, 405);
+        return true;
+      } catch (error) {
+        const status = typeof error?.status === "number" ? error.status : 400;
+        sendJson(
+          res,
+          {
+            success: false,
+            error:
+              error instanceof Error
+                ? error.message
+                : "Workspace request failed.",
+            ...(error?.current ? { current: error.current } : {}),
+          },
+          status,
+        );
+        return true;
+      }
+    }
+
     if (
       pathname === "/api/health/monitoring" ||
       pathname === "/api/health/monitoring/" ||

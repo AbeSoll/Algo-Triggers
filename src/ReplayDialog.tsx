@@ -60,7 +60,7 @@ export default function ReplayDialog({
       const bars = generateBars(rule.instrument, timeframe);
       if (from < bars[0].time - 86400000 || to > bars.at(-1)!.time + 86400000)
         throw new Error(
-          "This demo contains 12–16 October 2026. Select dates within that range.",
+          "This sample contains 12–16 October 2026. Select dates within that range.",
         );
       const calculated = replay(rule, bars, "historical", {
         start: from,

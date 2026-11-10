@@ -1,0 +1,706 @@
+diff --git a/index.html b/index.html
+index 1739ff1..664ea8f 100644
+--- a/index.html
++++ b/index.html
+@@ -6,9 +6,9 @@
+     <meta name="theme-color" content="#172b35" />
+     <meta
+       name="description"
+-      content="Algo Triggers: a no-code Brent research and alerting demo. Explore synthetic markets, build precise rules, and replay their signals."
++      content="HedgeSignal: auditable hedging triggers, controlled email alerts and Brent research, running on this computer."
+     />
+-    <title>Algo Triggers — Brent research workspace</title>
++    <title>HedgeSignal — hedging alert desk</title>
+   </head>
+   <body>
+     <div id="root"></div>
+diff --git a/playwright.config.ts b/playwright.config.ts
+index 1c2ea58..5be8c81 100644
+--- a/playwright.config.ts
++++ b/playwright.config.ts
+@@ -14,6 +14,7 @@ export default defineConfig({
+     command: "npm run dev",
+     url: "http://127.0.0.1:5173",
+     reuseExistingServer: true,
++    env: { WORKSPACE_SYNC: "off" },
+   },
+   reporter: [["list"], ["html", { open: "never" }]],
+ });
+diff --git a/server/apiHandler.mjs b/server/apiHandler.mjs
+index 7b7cb78..8f7cb96 100644
+--- a/server/apiHandler.mjs
++++ b/server/apiHandler.mjs
+@@ -197,6 +197,37 @@ export async function handleApiRequest(req, res) {
+       return true;
+     }
+ 
++    if (pathname === "/api/workspace") {
++      try {
++        const workspace = await import("./workspace.mjs");
++        if (req.method === "GET") {
++          sendJson(res, workspace.getWorkspace());
++          return true;
++        }
++        if (req.method === "POST") {
++          sendJson(res, workspace.saveWorkspace(await readJson(req)));
++          return true;
++        }
++        sendJson(res, { success: false, error: "Method not allowed." }, 405);
++        return true;
++      } catch (error) {
++        const status = typeof error?.status === "number" ? error.status : 400;
++        sendJson(
++          res,
++          {
++            success: false,
++            error:
++              error instanceof Error
++                ? error.message
++                : "Workspace request failed.",
++            ...(error?.current ? { current: error.current } : {}),
++          },
++          status,
++        );
++        return true;
++      }
++    }
++
+     if (
+       pathname === "/api/health/monitoring" ||
+       pathname === "/api/health/monitoring/" ||
+diff --git a/server/db.mjs b/server/db.mjs
+index 9603e70..b3d9c19 100644
+--- a/server/db.mjs
++++ b/server/db.mjs
+@@ -255,6 +255,14 @@ export function openDb() {
+       started_at TEXT NOT NULL
+     );
+   `);
++  db.exec(`
++    CREATE TABLE IF NOT EXISTS workspace_snapshot (
++      id INTEGER PRIMARY KEY CHECK (id = 1),
++      revision INTEGER NOT NULL,
++      body TEXT NOT NULL,
++      updated_at TEXT NOT NULL
++    );
++  `);
+   ensureSeedPilotData(db);
+   return db;
+ }
+diff --git a/server/workspace.mjs b/server/workspace.mjs
+new file mode 100644
+index 0000000..d89d4e3
+--- /dev/null
++++ b/server/workspace.mjs
+@@ -0,0 +1,74 @@
++// Durable server copy of the Rules & alerts workspace (rules, events, saved reports).
++// Single local workspace, optimistic revision check. Set WORKSPACE_SYNC=off to disable.
++import { openDb } from "./db.mjs";
++
++const MAX_BYTES = 4_000_000;
++const enabled = () => (process.env.WORKSPACE_SYNC || "on") !== "off";
++
++function fail(status, message, current) {
++  const error = new Error(message);
++  error.status = status;
++  if (current) error.current = current;
++  return error;
++}
++
++export function getWorkspace() {
++  if (!enabled()) return { enabled: false, revision: 0, store: null };
++  const row = openDb()
++    .prepare(
++      "SELECT revision, body, updated_at FROM workspace_snapshot WHERE id = 1",
++    )
++    .get();
++  if (!row) return { enabled: true, revision: 0, store: null };
++  return {
++    enabled: true,
++    revision: row.revision,
++    store: JSON.parse(row.body),
++    updatedAt: row.updated_at,
++  };
++}
++
++export function saveWorkspace(body) {
++  if (!enabled()) return { enabled: false, success: true };
++  const store = body?.store;
++  const ok =
++    Number.isInteger(body?.revision) &&
++    body.revision >= 0 &&
++    store &&
++    typeof store === "object" &&
++    store.schema === 1 &&
++    Array.isArray(store.rules) &&
++    Array.isArray(store.events) &&
++    Array.isArray(store.runs);
++  if (!ok) throw fail(422, "Workspace data is not in the expected format.");
++  const text = JSON.stringify(store);
++  if (text.length > MAX_BYTES) throw fail(413, "Workspace data is too large.");
++  const db = openDb();
++  db.exec("BEGIN IMMEDIATE");
++  try {
++    const row = db
++      .prepare("SELECT revision FROM workspace_snapshot WHERE id = 1")
++      .get();
++    if (row && body.revision < row.revision) {
++      db.exec("ROLLBACK");
++      throw fail(409, "The server holds a newer workspace. Reload first.", {
++        revision: row.revision,
++      });
++    }
++    db.prepare(
++      `INSERT INTO workspace_snapshot (id, revision, body, updated_at)
++       VALUES (1, ?, ?, ?)
++       ON CONFLICT(id) DO UPDATE SET revision = excluded.revision,
++         body = excluded.body, updated_at = excluded.updated_at`,
++    ).run(body.revision, text, new Date().toISOString());
++    db.exec("COMMIT");
++  } catch (error) {
++    try {
++      db.exec("ROLLBACK");
++    } catch {
++      /* already rolled back */
++    }
++    throw error;
++  }
++  return { enabled: true, success: true, revision: body.revision };
++}
+diff --git a/server/workspace.test.mjs b/server/workspace.test.mjs
+new file mode 100644
+index 0000000..49cc8e5
+--- /dev/null
++++ b/server/workspace.test.mjs
+@@ -0,0 +1,55 @@
++import { describe, expect, it } from "vitest";
++import { mkdtempSync } from "node:fs";
++import { tmpdir } from "node:os";
++import path from "node:path";
++
++process.env.DESK_DB = path.join(
++  mkdtempSync(path.join(tmpdir(), "algo-ws-")),
++  "desk.sqlite",
++);
++delete process.env.WORKSPACE_SYNC;
++const { getWorkspace, saveWorkspace } = await import("./workspace.mjs");
++const store = (n) => ({
++  schema: 1,
++  revision: n,
++  rules: [],
++  events: [],
++  runs: [],
++});
++
++describe("workspace snapshot", () => {
++  it("starts empty", () => {
++    expect(getWorkspace()).toMatchObject({
++      enabled: true,
++      revision: 0,
++      store: null,
++    });
++  });
++  it("saves and reloads the newest revision", () => {
++    saveWorkspace({ revision: 1, store: store(1) });
++    saveWorkspace({
++      revision: 2,
++      store: { ...store(2), rules: [{ id: "r" }] },
++    });
++    const got = getWorkspace();
++    expect(got.revision).toBe(2);
++    expect(got.store.rules).toHaveLength(1);
++  });
++  it("rejects an older revision with 409", () => {
++    try {
++      saveWorkspace({ revision: 1, store: store(1) });
++      throw new Error("should have failed");
++    } catch (e) {
++      expect(e.status).toBe(409);
++    }
++    expect(getWorkspace().revision).toBe(2);
++  });
++  it("rejects malformed data with 422", () => {
++    try {
++      saveWorkspace({ revision: 5, store: { schema: 9 } });
++      throw new Error("should have failed");
++    } catch (e) {
++      expect(e.status).toBe(422);
++    }
++  });
++});
+diff --git a/src/App.tsx b/src/App.tsx
+index fe86776..5dd2227 100644
+--- a/src/App.tsx
++++ b/src/App.tsx
+@@ -59,6 +59,7 @@ const OptionsLab = lazy(() => import("./OptionsLab"));
+ const PilotDesk = lazy(() => import("./PilotDesk"));
+ type View = "market" | "rules" | "options" | "history" | "pilot";
+ import { DEMO_ONLY } from "./deployment";
++import { fetchWorkspace, pushWorkspace } from "./workspaceSync";
+ 
+ type Store = {
+   schema: number;
+@@ -236,7 +237,7 @@ export default function App() {
+   storeRef.current = store;
+   const [view, setView] = useState<View>(() => {
+     const v = new URLSearchParams(location.search).get("view");
+-    return isView(v) ? v : "market";
++    return isView(v) ? v : "pilot";
+   });
+   const [instrument, setInstrument] = useState("brent-dec26");
+   const [timeframe, setTimeframe] = useState<"5m" | "15m" | "1h">("5m");
+@@ -435,6 +436,19 @@ export default function App() {
+       storeRef.current = updated;
+       setStore(updated);
+       setStorageError("");
++      if (!DEMO_ONLY)
++        void pushWorkspace(updated.revision, updated).then((result) => {
++          if (result === "failed")
++            setStorageError(
++              "Saved in this browser, but the server copy was not updated. Check that the HedgeSignal server is running.",
++            );
++          if (result === "conflict") {
++            setConflict(true);
++            setStorageError(
++              "The server holds a newer workspace. Reload before making changes.",
++            );
++          }
++        });
+       return true;
+     } catch {
+       setStorageError(
+@@ -453,12 +467,45 @@ export default function App() {
+     history.pushState({}, "", url);
+   }, []);
+   useEffect(() => {
+-    document.title = `${names[view]} · Algo Triggers`;
++    document.title = `${names[view]} · HedgeSignal`;
+   }, [view]);
++  useEffect(() => {
++    if (DEMO_ONLY) return;
++    let stop = false;
++    void fetchWorkspace().then((server) => {
++      if (stop || !server?.enabled) return;
++      const local = storeRef.current;
++      if (local.recovery) return;
++      const saved = server.store as Store | null;
++      if (
++        saved &&
++        server.revision > local.revision &&
++        saved.schema === 1 &&
++        Array.isArray(saved.rules) &&
++        saved.rules.every(validRule) &&
++        Array.isArray(saved.events) &&
++        saved.events.every(validEvent) &&
++        Array.isArray(saved.runs)
++      ) {
++        try {
++          localStorage.setItem(KEY, JSON.stringify(saved));
++        } catch {
++          /* keep the server copy in memory only */
++        }
++        storeRef.current = saved;
++        setStore(saved);
++      } else if (local.revision > server.revision) {
++        void pushWorkspace(local.revision, local);
++      }
++    });
++    return () => {
++      stop = true;
++    };
++  }, []);
+   useEffect(() => {
+     const listener = () => {
+       const v = new URLSearchParams(location.search).get("view");
+-      setView(isView(v) ? v : "market");
++      setView(isView(v) ? v : "pilot");
+       setQuery(new URLSearchParams(location.search).get("q") ?? "");
+       setPage(1);
+     };
+@@ -884,38 +931,41 @@ export default function App() {
+         Skip to workspace
+       </a>
+       <aside className="sidebar">
+-        <a className="brand" {...setViewLink("market")}>
++        <a className="brand" {...setViewLink("pilot")}>
+           <span className="brand-symbol">
+             <i />
+             <i />
+             <i />
+           </span>
+           <span>
+-            algo<span className="brand-light">triggers</span>
+-            <small>RESEARCH TERMINAL</small>
++            hedge<span className="brand-light">signal</span>
++            <small>HEDGING ALERT DESK</small>
+           </span>
+         </a>
+-        <div className="workspace-label">WORKSPACE</div>
++        <div className="workspace-label">HEDGING DESK</div>
+         <nav aria-label="Main navigation">
+-          <a {...setViewLink("market")}>
+-            <LayoutDashboard size={18} />
+-            Market explorer
++          <a {...setViewLink("pilot")}>
++            <ShieldCheck size={18} />
++            HedgeSignal pilot
+           </a>
+           <a {...setViewLink("rules")}>
+             <SlidersHorizontal size={18} />
+             Rules & alerts<span className="nav-count">{rules.length}</span>
+           </a>
+-          <a {...setViewLink("options")}>
+-            <FlaskConical size={18} />
+-            Options lab
+-          </a>
+           <a {...setViewLink("history")}>
+             <History size={18} />
+             Event history
+           </a>
+-          <a {...setViewLink("pilot")}>
+-            <ShieldCheck size={18} />
+-            HedgeSignal pilot
++          <div className="workspace-label secondary-label">
++            RESEARCH TOOLS · LATER PHASE
++          </div>
++          <a {...setViewLink("market")}>
++            <LayoutDashboard size={18} />
++            Market explorer
++          </a>
++          <a {...setViewLink("options")}>
++            <FlaskConical size={18} />
++            Options lab
+           </a>
+         </nav>
+         <div className="sidebar-divider" />
+@@ -1027,7 +1077,11 @@ export default function App() {
+           )}
+           <div className="page-heading">
+             <div>
+-              <div className="eyebrow">BRENT RESEARCH · SNAPSHOTS & DEMO</div>
++              <div className="eyebrow">
++                {view === "pilot"
++                  ? "HEDGESIGNAL · LOCAL INSTALLATION · TEST DATA"
++                  : "BRENT RESEARCH · TEST DATA & SNAPSHOTS"}
++              </div>
+               <h1>
+                 {names[view]}
+                 <span className="heading-dot">.</span>
+diff --git a/src/PilotDesk.tsx b/src/PilotDesk.tsx
+index bff19bc..755649d 100644
+--- a/src/PilotDesk.tsx
++++ b/src/PilotDesk.tsx
+@@ -787,6 +787,19 @@ export default function PilotDesk({
+     [overview.events, notifFilter],
+   );
+ 
++  function goToSection(id: string, tab?: "events" | "evaluations" | "audit") {
++    if (tab) setSubTab(tab);
++    const calm = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
++    requestAnimationFrame(() =>
++      document
++        .getElementById(id)
++        ?.scrollIntoView({
++          behavior: calm ? "auto" : "smooth",
++          block: "start",
++        }),
++    );
++  }
++
+   return (
+     <div className="pilot-workspace">
+       <aside
+@@ -871,8 +884,43 @@ export default function PilotDesk({
+         </div>
+       </div>
+ 
++      <nav className="pilot-screens" aria-label="HedgeSignal screens">
++        <button
++          className="btn btn-outline"
++          onClick={() => goToSection("hs-monitor")}
++        >
++          Monitor
++        </button>
++        <button
++          className="btn btn-outline"
++          onClick={() =>
++            setEditingRule({
++              name: "Custom hedging scenario",
++              definition: {
++                ...makeDefaultSeedPilotRule(),
++                recipients: [overview.defaultRecipient],
++              },
++            })
++          }
++        >
++          Rule setup
++        </button>
++        <button
++          className="btn btn-outline"
++          onClick={() => goToSection("hs-evidence", "events")}
++        >
++          Event detail
++        </button>
++        <button
++          className="btn btn-outline"
++          onClick={() => goToSection("hs-evidence", "audit")}
++        >
++          History and support
++        </button>
++      </nav>
++
+       {/* Section 1: Pilot Rules & 4-Valued Evaluation Monitor */}
+-      <section className="panel">
++      <section className="panel" id="hs-monitor">
+         <div className="panel-heading">
+           <div>
+             <h2>
+@@ -1181,7 +1229,7 @@ export default function PilotDesk({
+       </section>
+ 
+       {/* Section 3: Events, Outbox Reconciliation, Evaluation Log & Audit Trail */}
+-      <section className="panel">
++      <section className="panel" id="hs-evidence">
+         <div className="panel-heading">
+           <div className="view-switch" aria-label="Pilot evidence views">
+             <button
+diff --git a/src/styles.css b/src/styles.css
+index da2556d..9617836 100644
+--- a/src/styles.css
++++ b/src/styles.css
+@@ -2862,3 +2862,14 @@ tbody tr:hover {
+     flex-wrap: wrap;
+   }
+ }
++
++.pilot-screens {
++  display: flex;
++  flex-wrap: wrap;
++  gap: 8px;
++  margin: 0 0 16px;
++}
++#hs-monitor,
++#hs-evidence {
++  scroll-margin-top: 16px;
++}
+diff --git a/src/workspaceSync.ts b/src/workspaceSync.ts
+new file mode 100644
+index 0000000..50b8666
+--- /dev/null
++++ b/src/workspaceSync.ts
+@@ -0,0 +1,33 @@
++// Keeps a durable copy of the Rules & alerts workspace in the local server database.
++export type ServerWorkspace = {
++  enabled: boolean;
++  revision: number;
++  store: unknown | null;
++};
++export async function fetchWorkspace(): Promise<ServerWorkspace | null> {
++  try {
++    const r = await fetch("/api/workspace");
++    if (!r.ok) return null;
++    return (await r.json()) as ServerWorkspace;
++  } catch {
++    return null;
++  }
++}
++export async function pushWorkspace(
++  revision: number,
++  store: unknown,
++): Promise<"ok" | "off" | "conflict" | "failed"> {
++  try {
++    const r = await fetch("/api/workspace", {
++      method: "POST",
++      headers: { "Content-Type": "application/json" },
++      body: JSON.stringify({ revision, store }),
++    });
++    if (r.status === 409) return "conflict";
++    if (!r.ok) return "failed";
++    const body = (await r.json()) as { enabled?: boolean };
++    return body.enabled === false ? "off" : "ok";
++  } catch {
++    return "failed";
++  }
++}
+diff --git a/tests/chart-viewport.spec.ts b/tests/chart-viewport.spec.ts
+index 97ace15..40dffb0 100644
+--- a/tests/chart-viewport.spec.ts
++++ b/tests/chart-viewport.spec.ts
+@@ -98,7 +98,7 @@ test("manual snapshot refresh updates prices and appends bars without moving an
+     requests++;
+     return payload;
+   });
+-  await page.goto("/");
++  await page.goto("/?view=market");
+   const chart = page.locator(".chart-canvas");
+   await expect(chart).toHaveAttribute("data-bars-count", "80");
+   const originalCanvas = await chart.locator("canvas").first().elementHandle();
+@@ -178,7 +178,7 @@ test("automatic polling retains the inspected timestamps when the provider windo
+       },
+     }),
+   );
+-  await page.goto("/");
++  await page.goto("/?view=market");
+   const chart = page.locator(".chart-canvas");
+   await expect(chart).toHaveAttribute("data-bars-count", "80");
+   await page.clock.runFor(100);
+@@ -230,7 +230,7 @@ test("indicator, timezone and price-display changes preserve the inspected viewp
+   page,
+ }) => {
+   await mockMarket(page, bars);
+-  await page.goto("/");
++  await page.goto("/?view=market");
+   const chart = page.locator(".chart-canvas");
+   await expect(chart).toHaveAttribute("data-bars-count", "80");
+   const originalCanvas = await chart.locator("canvas").first().elementHandle();
+@@ -286,7 +286,7 @@ test("Fit and explicit market-context changes show the newly selected data exten
+     }));
+     return route.fulfill({ json: payload });
+   });
+-  await page.goto("/");
++  await page.goto("/?view=market");
+   const chart = page.locator(".chart-canvas");
+   await expect(chart).toHaveAttribute("data-bars-count", "80");
+   const original = await viewport(chart);
+diff --git a/tests/data-source.spec.ts b/tests/data-source.spec.ts
+index c467384..a1013eb 100644
+--- a/tests/data-source.spec.ts
++++ b/tests/data-source.spec.ts
+@@ -21,7 +21,7 @@ test.beforeEach(async ({ page }) => {
+ test("provider failure is unavailable until demo data is selected explicitly", async ({
+   page,
+ }) => {
+-  await page.goto("/");
++  await page.goto("/?view=market");
+   await expect(
+     page.getByRole("combobox", { name: "Market data", exact: true }),
+   ).toHaveValue("yahoo");
+@@ -70,7 +70,7 @@ test("observed bars show source time separately from fetch time and hide sample
+   await page.route("**/api/bars?**", (route) =>
+     route.fulfill({ json: bars() }),
+   );
+-  await page.goto("/");
++  await page.goto("/?view=market");
+   await expect(page.locator(".chart-canvas")).toBeVisible();
+   const provenance = page.getByLabel("Chart provenance");
+   await expect(provenance).toContainText("Yahoo Finance snapshot");
+diff --git a/tests/frontend.spec.ts b/tests/frontend.spec.ts
+index 04159da..b37740f 100644
+--- a/tests/frontend.spec.ts
++++ b/tests/frontend.spec.ts
+@@ -15,7 +15,7 @@ test("market workspace, curve, chart context and event evidence", async ({
+ }) => {
+   const errors: string[] = [];
+   page.on("pageerror", (e) => errors.push(e.message));
+-  await page.goto("/");
++  await page.goto("/?view=market");
+   await expect(
+     page.getByRole("heading", { name: "Market explorer." }),
+   ).toBeVisible();
+@@ -48,7 +48,7 @@ test("market workspace, curve, chart context and event evidence", async ({
+ test("create, invalid fields, replay, edit immutable version and persist", async ({
+   page,
+ }) => {
+-  await page.goto("/");
++  await page.goto("/?view=market");
+   await page.getByRole("button", { name: "Create rule", exact: true }).click();
+   await page.getByLabel("Rule name", { exact: true }).fill("");
+   await page.getByRole("button", { name: "Save rule" }).click();
+@@ -99,7 +99,7 @@ test("create, invalid fields, replay, edit immutable version and persist", async
+ test("ambiguous description, search empty state, cancel and data health", async ({
+   page,
+ }) => {
+-  await page.goto("/");
++  await page.goto("/?view=market");
+   await page.getByRole("button", { name: "Create rule", exact: true }).click();
+   await page
+     .getByText("Describe your idea (optional)", { exact: true })
+@@ -162,7 +162,7 @@ test("option chain, strategy and volatility data remain interactive", async ({
+   ).toEqual([]);
+ });
+ test("desktop and narrow keyboard-accessible workspace", async ({ page }) => {
+-  await page.goto("/");
++  await page.goto("/?view=market");
+   await page.screenshot({
+     path: "docs/evidence/market-desktop.png",
+     fullPage: true,
+diff --git a/tests/recovery.spec.ts b/tests/recovery.spec.ts
+index 899d133..261429a 100644
+--- a/tests/recovery.spec.ts
++++ b/tests/recovery.spec.ts
+@@ -16,7 +16,7 @@ test("corrupt local data has an explicit reset recovery", async ({ page }) => {
+       sessionStorage.setItem("injected", "yes");
+     }
+   });
+-  await page.goto("/");
++  await page.goto("/?view=market");
+   await expect(page.getByRole("alert")).toContainText("could not be read");
+   await page
+     .getByRole("button", { name: "Reset local demo data", exact: true })
+@@ -31,7 +31,7 @@ test("corrupt local data has an explicit reset recovery", async ({ page }) => {
+ });
+ 
+ test("storage write failure preserves the unsaved draft", async ({ page }) => {
+-  await page.goto("/");
++  await page.goto("/?view=market");
+   await page.evaluate(() => {
+     Storage.prototype.setItem = () => {
+       throw new DOMException("Test quota", "QuotaExceededError");
+@@ -54,7 +54,7 @@ test("storage write failure preserves the unsaved draft", async ({ page }) => {
+ test("a new one-shot monitor starts at activation, not historical fixture start", async ({
+   page,
+ }) => {
+-  await page.goto("/");
++  await page.goto("/?view=market");
+   await page.getByRole("button", { name: "Create rule", exact: true }).click();
+   await page
+     .getByLabel("Rule name", { exact: true })
+@@ -110,7 +110,7 @@ test("a new one-shot monitor starts at activation, not historical fixture start"
+ test("EMA values retain full warm-up when the visible range changes", async ({
+   page,
+ }) => {
+-  await page.goto("/");
++  await page.goto("/?view=market");
+   await page.getByText("Indicator settings ·", { exact: false }).click();
+   await page.getByLabel("Average method", { exact: true }).selectOption("EMA");
+   const fiveDay = await page.getByTestId("ma-value-0").innerText();
+@@ -121,7 +121,7 @@ test("EMA values retain full warm-up when the visible range changes", async ({
+ test("resume preserves cooldown measured from an actual emission", async ({
+   page,
+ }) => {
+-  await page.goto("/");
++  await page.goto("/?view=market");
+   await page.getByRole("button", { name: "Create rule", exact: true }).click();
+   await page
+     .getByLabel("Rule name", { exact: true })
+@@ -175,7 +175,7 @@ test("resume preserves cooldown measured from an actual emission", async ({
+ test("malformed stored event evidence recovers without crashing", async ({
+   page,
+ }) => {
+-  await page.goto("/");
++  await page.goto("/?view=market");
+   await page
+     .getByRole("button", { name: "Advance demo bar", exact: true })
+     .click();
+diff --git a/tests/simplicity.spec.ts b/tests/simplicity.spec.ts
+index 76d173e..4f0f19d 100644
+--- a/tests/simplicity.spec.ts
++++ b/tests/simplicity.spec.ts
+@@ -13,7 +13,7 @@ test.beforeEach(async ({ page }) => {
+ test("a rule can be saved from a template without a description or advanced settings", async ({
+   page,
+ }) => {
+-  await page.goto("/");
++  await page.goto("/?view=market");
+   await page.getByRole("button", { name: "Create rule", exact: true }).click();
+   const editor = page.getByRole("dialog");
+   await expect(
+@@ -70,7 +70,7 @@ test("a rule can be saved from a template without a description or advanced sett
+ test("templates and optional descriptions preserve extra conditions and advanced errors remain reachable", async ({
+   page,
+ }) => {
+-  await page.goto("/");
++  await page.goto("/?view=market");
+   await page.getByRole("button", { name: "Create rule", exact: true }).click();
+   const editor = page.getByRole("dialog");
+   await editor.getByText("Advanced settings", { exact: true }).click();

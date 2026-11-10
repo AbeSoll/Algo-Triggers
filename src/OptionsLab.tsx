@@ -677,7 +677,7 @@ export default function OptionsLab({
             >
               <option value="BNO">
                 {dataMode === "demo"
-                  ? "Demo Brent futures fixtures"
+                  ? "Sample Brent futures fixtures"
                   : "BNO · Brent oil fund"}
               </option>
               <option value="USO">USO · WTI oil fund</option>
@@ -789,7 +789,7 @@ export default function OptionsLab({
           >
             {isOptionsLoading
               ? "Fetching the selected fund and expiry."
-              : `${optionsError || "No observed chain returned."} Retry or explicitly choose Demo samples.`}
+              : `${optionsError || "No observed chain returned."} Retry or explicitly choose Synthetic samples.`}
             <button
               className="btn btn-outline"
               disabled={isOptionsLoading}
@@ -2105,10 +2105,10 @@ export default function OptionsLab({
               <CircleHelp size={15} />
               <p>
                 <strong>Historical options replay is unavailable.</strong> This
-                demo has no option-level history. Premium rules open as drafts;
-                futures bars cannot supply evidence for an option rule. Exercise
-                style, multiplier, model and exchange expiry conventions still
-                require verification.
+                sample has no option-level history. Premium rules open as
+                drafts; futures bars cannot supply evidence for an option rule.
+                Exercise style, multiplier, model and exchange expiry
+                conventions still require verification.
               </p>
             </div>
           </section>

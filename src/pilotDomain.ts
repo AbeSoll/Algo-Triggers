@@ -6,7 +6,7 @@ export type PilotRuleLifecycle =
 export type PilotEvalOutcome = "TRUE" | "FALSE" | "NOT_EVALUABLE" | "ERROR";
 export type PilotNotificationState =
   "PENDING" | "SENDING" | "ACCEPTED" | "HELD" | "FAILED" | "UNKNOWN";
-export type PilotRole = "trader" | "approver" | "support" | "admin" | "viewer";
+export type PilotRole = "team_member";
 
 export type PilotFieldId =
   | "reference_price"

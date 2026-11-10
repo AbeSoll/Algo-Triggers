@@ -37,7 +37,7 @@ export default function DataSourceNotice({
     >
       <strong>
         {mode === "demo"
-          ? "Demo sample · synthetic"
+          ? "Sample sample · synthetic"
           : loading
             ? "Loading Yahoo snapshot…"
             : meta?.status === "available"

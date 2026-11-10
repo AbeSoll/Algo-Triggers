@@ -33,7 +33,6 @@ import {
   type PilotNotificationState,
   type PilotObservation,
   type PilotOperator,
-  type PilotRole,
   type PilotRuleDefinition,
   type PilotTestSuiteResult,
 } from "./pilotDomain";
@@ -166,7 +165,7 @@ function buildLocalSeedOverview(): PilotOverviewPayload {
   const summary = summarizePilotRule(def);
   return {
     success: true,
-    service: "HedgeSignal Pilot (Browser Sandbox)",
+    service: "HedgeSignal Pilot (Local sample session)",
     engineVersion: PILOT_ENGINE_VERSION,
     mode: "SYNTHETIC",
     smtpConfigured: false,
@@ -201,7 +200,7 @@ function buildLocalSeedOverview(): PilotOverviewPayload {
             summary,
             mode: def.mode,
             scheduleSeconds: def.scheduleSeconds,
-            createdBy: "trader-demo",
+            createdBy: "team-member",
             approvedBy: null,
             approvedAt: null,
             createdAt: now,
@@ -232,12 +231,11 @@ function buildLocalSeedOverview(): PilotOverviewPayload {
       {
         id: "seed-audit-1",
         actor: "system-seed",
-        role: "admin",
+        role: "system",
         action: "SEED_PILOT_BASELINE",
         target: "pilot-rule-br-ex-01:v1",
         outcome: "ALLOWED",
-        details:
-          "Initialised BR-EX-01 synthetic pilot scenario in browser sandbox.",
+        details: "Initialised BR-EX-01 synthetic scenario in browser sandbox.",
         createdAt: now,
       },
     ],
@@ -277,7 +275,10 @@ export default function PilotDesk({
 }: {
   onStatus: (message: string) => void;
 }) {
-  const [role, setRole] = useState<PilotRole>("approver");
+  const role = "team_member";
+  const [screen, setScreen] = useState<"monitor" | "inputs" | "history">(
+    "monitor",
+  );
   const [tzMode, setTzMode] = useState<"UTC" | "LOCAL_AND_UTC">("UTC");
   const [overview, setOverview] = useState<PilotOverviewPayload>(
     buildLocalSeedOverview,
@@ -315,7 +316,6 @@ export default function PilotDesk({
   const actorHeaders = useMemo(
     () => ({
       "Content-Type": "application/json",
-      "X-Pilot-Role": role,
       "X-Pilot-Actor": `${role}-desk`,
     }),
     [role],
@@ -358,7 +358,7 @@ export default function PilotDesk({
     });
     const payload = await response.json();
     if (!response.ok || payload?.success !== true) {
-      throw new Error(payload?.error || "Pilot operation failed.");
+      throw new Error(payload?.error || "Operation failed.");
     }
     return payload as T;
   }
@@ -403,12 +403,6 @@ export default function PilotDesk({
       return;
     }
 
-    if (!["trader", "approver", "admin"].includes(role)) {
-      setObsError(
-        `Role "${role}" is not authorised to capture observations (requires trader, approver or admin).`,
-      );
-      return;
-    }
     const validated = validateObservationInput(payload);
     if (!validated.valid || !validated.observation) {
       setObsError(validated.error ?? "Invalid observation.");
@@ -487,12 +481,6 @@ export default function PilotDesk({
       return;
     }
 
-    if (!["approver", "admin"].includes(role)) {
-      setErrorBanner(
-        `Role "${role}" is not authorised for approve operations (requires approver or admin).`,
-      );
-      return;
-    }
     setOverview((prev) => {
       const nextRules = prev.rules.map((r) =>
         r.id === rule.id
@@ -511,8 +499,8 @@ export default function PilotDesk({
     });
     onStatus(
       isActive
-        ? `Paused local pilot rule "${rule.name}".`
-        : `Activated local pilot rule "${rule.name}" · v${rule.latestVersion}.`,
+        ? `Paused local rule "${rule.name}".`
+        : `Activated local rule "${rule.name}" · v${rule.latestVersion}.`,
     );
   }
 
@@ -526,7 +514,7 @@ export default function PilotDesk({
         }>("/api/pilot/evaluate", {});
         await loadOverview();
         onStatus(
-          `Evaluated ${res.activeRulesChecked} active pilot rule(s); ${res.emittedCount} event(s) emitted.`,
+          `Evaluated ${res.activeRulesChecked} active rule(s); ${res.emittedCount} event(s) emitted.`,
         );
       } catch (err) {
         setErrorBanner(
@@ -537,12 +525,6 @@ export default function PilotDesk({
       return;
     }
 
-    if (!["support", "approver", "admin"].includes(role)) {
-      setErrorBanner(
-        `Role "${role}" cannot trigger operational evaluation (requires support, approver or admin).`,
-      );
-      return;
-    }
     const nowIso = new Date().toISOString();
     let emitted = 0;
     setOverview((prev) => {
@@ -654,7 +636,7 @@ export default function PilotDesk({
         setEditingRule(null);
         await loadOverview();
         onStatus(
-          `Saved immutable pilot rule "${editingRule.name}" · v${res.version}.`,
+          `Saved immutable rule "${editingRule.name}" · v${res.version}.`,
         );
       } catch (err) {
         setRuleErrors([
@@ -732,7 +714,7 @@ export default function PilotDesk({
           ...prev.rules,
         ],
       }));
-      onStatus(`Created local pilot scenario "${editingRule.name}" · v1.`);
+      onStatus(`Created local scenario "${editingRule.name}" · v1.`);
     }
     setEditingRule(null);
   }
@@ -765,7 +747,7 @@ export default function PilotDesk({
         {
           intentId,
           resolution,
-          note: `Reconciled via HedgeSignal pilot desk (${role}).`,
+          note: `Reconciled via HedgeSignal desk (${role}).`,
         },
       );
       await loadOverview();
@@ -789,18 +771,15 @@ export default function PilotDesk({
 
   return (
     <div className="pilot-workspace">
-      <aside
-        className="data-source-notice"
-        aria-label="HedgeSignal pilot notice"
-      >
+      <aside className="data-source-notice" aria-label="HedgeSignal notice">
         <strong>
-          HedgeSignal SRS v0.2 Pilot ·{" "}
-          {connected ? "Connected SQLite & Worker" : "Browser Sandbox"}
+          HedgeSignal ·{" "}
+          {connected ? "Monitoring service connected" : "Local sample session"}
         </strong>
         <span>
           {connected
             ? `Mode: ${overview.mode} · Engine ${overview.engineVersion} · SMTP ${overview.smtpConfigured ? "configured" : "outbox hold mode"}. Human review required; no orders are placed.`
-            : "Synthetic browser sandbox active. Start the local server (`npm run dev`) for durable SQLite storage, scheduled background worker and email outbox."}
+            : "Service unavailable. This session uses synthetic inputs; changes are not saved to the server. Reconnect before scheduled monitoring or email delivery."}
         </span>
       </aside>
 
@@ -824,7 +803,7 @@ export default function PilotDesk({
           </strong>
         </div>
         <div>
-          <span className="small muted">PILOT SCENARIOS</span>
+          <span className="small muted">SCENARIOS</span>
           <strong>
             {overview.activeRulesCount}
             <small>active of {overview.rules.length}</small>
@@ -838,22 +817,6 @@ export default function PilotDesk({
           </strong>
         </div>
         <div className="pilot-controls-inline">
-          <label className="field">
-            Pilot actor role
-            <select
-              value={role}
-              onChange={(e) => {
-                setRole(e.target.value as PilotRole);
-                setErrorBanner("");
-              }}
-            >
-              <option value="approver">Business Approver</option>
-              <option value="trader">Trader / Analyst</option>
-              <option value="support">Support Operator</option>
-              <option value="admin">System Administrator</option>
-              <option value="viewer">Read-only Viewer</option>
-            </select>
-          </label>
           <label className="field">
             Time display
             <select
@@ -871,8 +834,34 @@ export default function PilotDesk({
         </div>
       </div>
 
+      <nav className="desk-actions" aria-label="Workspace sections">
+        <button
+          className="btn btn-outline"
+          aria-pressed={screen === "monitor"}
+          onClick={() => setScreen("monitor")}
+        >
+          Monitor
+        </button>
+        <button
+          className="btn btn-outline"
+          aria-pressed={screen === "inputs"}
+          onClick={() => setScreen("inputs")}
+        >
+          Inputs
+        </button>
+        <button
+          className="btn btn-outline"
+          aria-pressed={screen === "history"}
+          onClick={() => setScreen("history")}
+        >
+          History &amp; email
+        </button>
+      </nav>
+      <p className="hint">
+        One shared team workspace. Barchart data connection is not configured.
+      </p>
       {/* Section 1: Pilot Rules & 4-Valued Evaluation Monitor */}
-      <section className="panel">
+      <section className="panel" hidden={screen !== "monitor"}>
         <div className="panel-heading">
           <div>
             <h2>
@@ -880,8 +869,9 @@ export default function PilotDesk({
               <span className="count-label">{overview.rules.length}</span>
             </h2>
             <p>
-              Immutable rule versions with explicit TRUE, FALSE, NOT_EVALUABLE
-              and ERROR outcomes (FR-004, FR-014, FR-036).
+              Configure a scenario, test its conditions, then start monitoring.
+              Open the recorded result to see why it matched or could not be
+              evaluated.
             </p>
           </div>
           <div className="desk-actions">
@@ -897,7 +887,7 @@ export default function PilotDesk({
                 })
               }
             >
-              <Plus size={15} /> New pilot scenario
+              <Plus size={15} /> New scenario
             </button>
             <button
               className="btn btn-primary"
@@ -908,7 +898,7 @@ export default function PilotDesk({
             {!DEMO_ONLY && (
               <button
                 className="icon-button"
-                aria-label="Refresh pilot status"
+                aria-label="Refresh monitoring status"
                 onClick={() => void loadOverview()}
                 disabled={loading}
               >
@@ -926,8 +916,7 @@ export default function PilotDesk({
         >
           <table className="rules-table">
             <caption className="sr-only">
-              HedgeSignal pilot scenarios, evaluation outcomes and lifecycle
-              controls
+              HedgeSignal scenarios, evaluation outcomes and lifecycle controls
             </caption>
             <thead>
               <tr>
@@ -953,8 +942,8 @@ export default function PilotDesk({
                       <span className="table-meta">
                         Updated {formatDualTime(rule.updatedAt, tzMode)}
                         {latestVer?.approvedBy
-                          ? ` · Approved by ${latestVer.approvedBy}`
-                          : " · Approval pending"}
+                          ? ` · Activated by ${latestVer.approvedBy}`
+                          : " · Not activated"}
                       </span>
                     </td>
                     <td>
@@ -985,7 +974,7 @@ export default function PilotDesk({
                       <div
                         className="row-actions"
                         role="group"
-                        aria-label={`Pilot actions for ${rule.name}`}
+                        aria-label={`Scenario actions for ${rule.name}`}
                       >
                         <div className="rule-primary-actions">
                           <button
@@ -1038,7 +1027,7 @@ export default function PilotDesk({
       </section>
 
       {/* Section 2: Input Observations & Freshness Gate (UC-02, EERD) */}
-      <section className="panel">
+      <section className="panel" hidden={screen !== "inputs"}>
         <div className="panel-heading">
           <div>
             <h2>
@@ -1048,9 +1037,8 @@ export default function PilotDesk({
               </span>
             </h2>
             <p>
-              Market vs Business EERD specialization; invalid or future-dated
-              inputs are rejected or quarantined, never converted to zero
-              (FR-005–FR-008).
+              Market and business inputs; invalid or future-dated inputs are
+              rejected or quarantined, never converted to zero.
             </p>
           </div>
         </div>
@@ -1134,16 +1122,16 @@ export default function PilotDesk({
         <div
           className="table-wrap"
           role="region"
-          aria-label="Recorded pilot observations table"
+          aria-label="Recorded observations table"
           tabIndex={0}
         >
           <table>
             <caption className="sr-only">
-              Recorded pilot observations and quality status
+              Recorded observations and quality status
             </caption>
             <thead>
               <tr>
-                <th>Field & EERD subtype</th>
+                <th>Field & input category</th>
                 <th>Value & unit</th>
                 <th>Instrument / scope</th>
                 <th>Provenance & mode</th>
@@ -1181,9 +1169,9 @@ export default function PilotDesk({
       </section>
 
       {/* Section 3: Events, Outbox Reconciliation, Evaluation Log & Audit Trail */}
-      <section className="panel">
+      <section className="panel" hidden={screen !== "history"}>
         <div className="panel-heading">
-          <div className="view-switch" aria-label="Pilot evidence views">
+          <div className="view-switch" aria-label="Evidence views">
             <button
               aria-pressed={subTab === "events"}
               className={subTab === "events" ? "active" : ""}
@@ -1332,7 +1320,7 @@ export default function PilotDesk({
               </table>
             </div>
           ) : (
-            <Empty title="No pilot trigger events recorded yet">
+            <Empty title="No trigger events recorded yet">
               Activate a validated scenario and press Evaluate active rules to
               record durable trigger evidence and email outbox intents.
             </Empty>
@@ -1399,7 +1387,7 @@ export default function PilotDesk({
               <thead>
                 <tr>
                   <th>Time</th>
-                  <th>Actor & role</th>
+                  <th>Recorded by</th>
                   <th>Action</th>
                   <th>Target</th>
                   <th>Outcome</th>
@@ -1412,7 +1400,6 @@ export default function PilotDesk({
                     <td>{formatDualTime(entry.createdAt, tzMode)}</td>
                     <td>
                       <strong>{entry.actor}</strong>{" "}
-                      <small>({entry.role})</small>
                     </td>
                     <td>
                       <code>{entry.action}</code>
@@ -1537,7 +1524,7 @@ export default function PilotDesk({
       {/* Trigger Event Evidence & Notification Attempt Modal (FR-022, FR-029) */}
       {eventModal && (
         <Modal
-          title="Versioned pilot event & delivery evidence"
+          title="Versioned event & delivery evidence"
           onClose={() => setEventModal(null)}
           wide
         >
@@ -1608,7 +1595,7 @@ export default function PilotDesk({
           <p className="notice">
             Provider acceptance (ACCEPTED) means the mail service accepted the
             submission; it does not assert inbox receipt unless delivery
-            confirmation exists (FR-029).
+            confirmation exists.
           </p>
           <div className="modal-actions">
             <button
@@ -1626,8 +1613,8 @@ export default function PilotDesk({
         <Modal
           title={
             editingRule.ruleId
-              ? "Save new immutable pilot version"
-              : "Configure pilot hedging scenario"
+              ? "Save new rule version"
+              : "Configure hedging scenario"
           }
           onClose={() => {
             setEditingRule(null);
@@ -1698,11 +1685,9 @@ export default function PilotDesk({
                     })
                   }
                 >
-                  <option value="SYNTHETIC">SYNTHETIC (pilot test)</option>
+                  <option value="SYNTHETIC">Synthetic inputs</option>
                   <option value="REPLAY">REPLAY (controlled dataset)</option>
-                  <option value="AUTHORISED_PILOT">
-                    AUTHORISED_PILOT (requires approval)
-                  </option>
+                  <option value="AUTHORISED_PILOT">Authorised inputs</option>
                 </select>
               </label>
               <label className="field">
@@ -1972,7 +1957,7 @@ export default function PilotDesk({
             </div>
 
             <div className="rule-live-card">
-              <strong>Readable rule preview (FR-013)</strong>
+              <strong>Readable rule preview</strong>
               <p>{summarizePilotRule(editingRule.definition)}</p>
             </div>
 

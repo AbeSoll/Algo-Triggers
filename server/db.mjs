@@ -37,7 +37,7 @@ function ensureSeedPilotData(database) {
         `INSERT INTO pilot_rule_versions (
           id, rule_id, version, definition_json, summary, mode, schedule_seconds,
           trigger_policy_json, recipients_json, created_by, approved_by, approved_at, created_at
-        ) VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, 'trader-demo', NULL, NULL, ?)`,
+        ) VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, 'team-member', NULL, NULL, ?)`,
       )
       .run(
         versionId,
@@ -72,7 +72,7 @@ function ensureSeedPilotData(database) {
       .prepare(
         `INSERT INTO pilot_audit_events (
           id, actor, role, action, target, outcome, safe_details, created_at
-        ) VALUES (?, 'system-seed', 'admin', 'SEED_PILOT_BASELINE', ?, 'ALLOWED', 'Initialised BR-EX-01 synthetic pilot scenario and observation.', ?)`,
+        ) VALUES (?, 'system-seed', 'system', 'SEED_PILOT_BASELINE', ?, 'ALLOWED', 'Initialised BR-EX-01 synthetic pilot scenario and observation.', ?)`,
       )
       .run(crypto.randomUUID(), `${ruleId}:v1`, now);
 
@@ -253,6 +253,14 @@ export function openDb() {
       last_error TEXT,
       missed_intervals INTEGER NOT NULL DEFAULT 0,
       started_at TEXT NOT NULL
+    );
+  `);
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS workspace_snapshot (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      revision INTEGER NOT NULL,
+      body TEXT NOT NULL,
+      updated_at TEXT NOT NULL
     );
   `);
   ensureSeedPilotData(db);

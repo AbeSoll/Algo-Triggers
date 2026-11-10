@@ -17,7 +17,7 @@ export function evaluateDemoStep(
   starts: Record<string, number>,
 ): TriggerEvent[] {
   if (!Number.isFinite(baseTime))
-    throw new Error("The demo replay clock needs a valid timestamp.");
+    throw new Error("The sample replay clock needs a valid timestamp.");
 
   const defaultStart = generateBars("brent-dec26", "5m")[600].time;
   const series = new Map<string, Bar[]>();
@@ -25,7 +25,7 @@ export function evaluateDemoStep(
     if (rule.status !== "monitoring") return [];
     const start = starts[`${rule.id}:${rule.version}`] ?? defaultStart;
     if (!Number.isFinite(start))
-      throw new Error("The demo monitor activation needs a valid timestamp.");
+      throw new Error("The sample monitor activation needs a valid timestamp.");
     if (start > baseTime) return [];
 
     const timeframe = rule.timeframe ?? "5m";

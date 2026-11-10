@@ -98,7 +98,7 @@ test("manual snapshot refresh updates prices and appends bars without moving an 
     requests++;
     return payload;
   });
-  await page.goto("/");
+  await page.goto("/?view=market");
   const chart = page.locator(".chart-canvas");
   await expect(chart).toHaveAttribute("data-bars-count", "80");
   const originalCanvas = await chart.locator("canvas").first().elementHandle();
@@ -178,7 +178,7 @@ test("automatic polling retains the inspected timestamps when the provider windo
       },
     }),
   );
-  await page.goto("/");
+  await page.goto("/?view=market");
   const chart = page.locator(".chart-canvas");
   await expect(chart).toHaveAttribute("data-bars-count", "80");
   await page.clock.runFor(100);
@@ -230,7 +230,7 @@ test("indicator, timezone and price-display changes preserve the inspected viewp
   page,
 }) => {
   await mockMarket(page, bars);
-  await page.goto("/");
+  await page.goto("/?view=market");
   const chart = page.locator(".chart-canvas");
   await expect(chart).toHaveAttribute("data-bars-count", "80");
   const originalCanvas = await chart.locator("canvas").first().elementHandle();
@@ -286,7 +286,7 @@ test("Fit and explicit market-context changes show the newly selected data exten
     }));
     return route.fulfill({ json: payload });
   });
-  await page.goto("/");
+  await page.goto("/?view=market");
   const chart = page.locator(".chart-canvas");
   await expect(chart).toHaveAttribute("data-bars-count", "80");
   const original = await viewport(chart);
@@ -329,7 +329,7 @@ test("Fit and explicit market-context changes show the newly selected data exten
     .getByRole("combobox", { name: "Market data", exact: true })
     .selectOption("demo");
   await expect(page.getByLabel("Chart provenance")).toContainText(
-    "Demo sample · synthetic",
+    "Sample sample · synthetic",
   );
   await expectFullExtent(240);
 });

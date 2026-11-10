@@ -1,5 +1,11 @@
 # Algo Triggers UX contract
 
+## Current HedgeSignal team workspace (v0.3)
+
+The default workspace is the server-backed HedgeSignal desk. One Team Member creates, tests, activates and pauses scenarios; there is no role selector or administrator workflow. Monitor, Inputs, and History & email separate the three tasks. React/TypeScript calls the Node service, with SQLite preserving immutable rule versions, observations, events and email status. Optional deployment-token protection remains. Source badges describe synthetic or imported data accurately; Barchart is not connected. No automatic trading is performed. The SRS v0.3 in docs is authoritative.
+
+The research tools described below retain their separate browser-local replay behavior and do not replace the server-backed desk. Their historical verification evidence does not certify the new desk.
+
 ## Product context
 
 English research UI for market-literate non-programmers. Source: `docs/ALGO-TRIGGERS-REQUIREMENTS.md`, particularly sections 5–9. Current scope: observed Yahoo snapshots plus explicit synthetic demo mode, with browser-local rule storage and sample-only rule testing. Chart display offers local time and UTC; fixture evaluation uses UTC; exchange sessions are not inferred. Accessibility target is WCAG 2.2 AA, with test evidence limited to the exercised browsers and workflows.
@@ -28,7 +34,7 @@ Create and edit use the same rule drawer. Save appends an immutable version and 
 
 Local browser storage is labeled. Failure to save is a persistent error with input preserved; success is not announced until storage succeeds. A corrupt or incompatible stored dataset is ignored with a recovery message and demo seeds. Cross-tab storage changes prompt reload instead of overwriting newer state silently. A read-only Yahoo adapter supplies market snapshots. No server-side rule persistence, account, multi-user locking or durable operational guarantee exists.
 
-Monitoring is explicitly manual: Start demo monitoring then Advance demo bar. Paused rules emit nothing. Browser closure stops the demo. Resume starts a new input interval while retaining the last actual emission for cooldown and one-shot consumption; missed paused-period events are not replayed. Duplicate a consumed one-shot or create a new version to explicitly start another. Historical replay ignores monitor status, evaluates the full warm-up prefix and filters events to the requested output range. It stores the rule snapshot, interval, dataset and engine identifiers. Results count signals, not trades.
+Monitoring is explicitly manual: Start sample monitoring then Advance sample bar. Paused rules emit nothing. Browser closure stops the demo. Resume starts a new input interval while retaining the last actual emission for cooldown and one-shot consumption; missed paused-period events are not replayed. Duplicate a consumed one-shot or create a new version to explicitly start another. Historical replay ignores monitor status, evaluates the full warm-up prefix and filters events to the requested output range. It stores the rule snapshot, interval, dataset and engine identifiers. Results count signals, not trades.
 
 ## Dataset navigation
 
@@ -52,11 +58,11 @@ Rule templates and optional text suggestions only replace the first condition; a
 
 Test rule opens a sample-history test. Its primary result is the number of emitted alerts after the saved frequency and cooldown policy. Evaluation statistics are optional. Event details lead with the original rule-version summary and retain a disclosure for recorded operands, including false and unknown conditions. The exact historical version is never replaced by the current rule version.
 
-Options views are local pressed-button selections, not a custom tab widget. Only one of chain, strategy builder or volatility is shown. In-memory edits survive view changes. Changing expiry, underlying or strategy template retains the existing data behavior; view switching itself does not reset a position. Greeks remain optional. Sample browser journeys explicitly select Demo samples; separate provider journeys use mocked observations to verify source labeling and unavailable states.
+Options views are local pressed-button selections, not a custom tab widget. Only one of chain, strategy builder or volatility is shown. In-memory edits survive view changes. Changing expiry, underlying or strategy template retains the existing data behavior; view switching itself does not reset a position. Greeks remain optional. Sample browser journeys explicitly select Synthetic samples; separate provider journeys use mocked observations to verify source labeling and unavailable states.
 
 ## Observed-data contract
 
-Yahoo snapshots are the default market display source. The persisted source preference can be changed explicitly to Demo samples; a failed request never changes it. Bars, individual contract quotes and option chains expose source, status, provider observation time, actual fetch time and unknown delay. Cached snapshots keep their original fetch time. Quote age is informational: markets may be closed and no exchange-specific freshness SLA has been established.
+Yahoo snapshots are the default market display source. The persisted source preference can be changed explicitly to Synthetic samples; a failed request never changes it. Bars, individual contract quotes and option chains expose source, status, provider observation time, actual fetch time and unknown delay. Cached snapshots keep their original fetch time. Quote age is informational: markets may be closed and no exchange-specific freshness SLA has been established.
 
 Unavailable prices stay null. Missing OHLC bars are omitted and identified in metadata, never forward-filled or rounded by the provider adapter. Missing volume is null. A curve requires the listed contracts and exposes each quote time; it is not a synchronized exchange snapshot. Fixed expiry identifiers must request matching listed-contract symbols; a generic front contract cannot stand in for December.
 
@@ -66,4 +72,4 @@ Fund option drafts retain BNO/USO identity, strike, side, expiry, price field, o
 
 ## Hosted presentation demo
 
-The Pages build is a separate demo-only deployment. A persistent shared provenance notice names synthetic data, browser-local storage and unavailable live/email services. The source selector is locked to Demo samples, including when an old Yahoo preference exists. Monitoring remains manual sample playback and never calls the email API. Email and live-price check buttons are disabled with an associated explanation. Standard local builds retain their existing server behavior.
+The Pages build is a separate demo-only deployment. A persistent shared provenance notice names synthetic data, browser-local storage and unavailable live/email services. The source selector is locked to Synthetic samples, including when an old Yahoo preference exists. Monitoring remains manual sample playback and never calls the email API. Email and live-price check buttons are disabled with an associated explanation. Standard local builds retain their existing server behavior.

@@ -15,7 +15,7 @@ test("market workspace, curve, chart context and event evidence", async ({
 }) => {
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
-  await page.goto("/");
+  await page.goto("/?view=market");
   await expect(
     page.getByRole("heading", { name: "Market explorer." }),
   ).toBeVisible();
@@ -48,7 +48,7 @@ test("market workspace, curve, chart context and event evidence", async ({
 test("create, invalid fields, replay, edit immutable version and persist", async ({
   page,
 }) => {
-  await page.goto("/");
+  await page.goto("/?view=market");
   await page.getByRole("button", { name: "Create rule", exact: true }).click();
   await page.getByLabel("Rule name", { exact: true }).fill("");
   await page.getByRole("button", { name: "Save rule" }).click();
@@ -99,7 +99,7 @@ test("create, invalid fields, replay, edit immutable version and persist", async
 test("ambiguous description, search empty state, cancel and data health", async ({
   page,
 }) => {
-  await page.goto("/");
+  await page.goto("/?view=market");
   await page.getByRole("button", { name: "Create rule", exact: true }).click();
   await page
     .getByText("Describe your idea (optional)", { exact: true })
@@ -125,11 +125,11 @@ test("ambiguous description, search empty state, cancel and data health", async 
   ).toBeVisible();
   await page.getByRole("button", { name: "Close dialog" }).click();
   await page.getByRole("button", { name: "Workspace settings" }).click();
-  await page.getByLabel("Demo data health").selectOption("stale");
+  await page.getByLabel("Sample data health").selectOption("stale");
   await page.getByRole("button", { name: "Close dialog" }).click();
   await page.getByRole("link", { name: "Market explorer" }).click();
   await expect(page.getByText("Quotes are stale")).toBeVisible();
-  await page.getByRole("button", { name: "Restore demo data" }).click();
+  await page.getByRole("button", { name: "Restore sample data" }).click();
 });
 test("option chain, strategy and volatility data remain interactive", async ({
   page,
@@ -162,7 +162,7 @@ test("option chain, strategy and volatility data remain interactive", async ({
   ).toEqual([]);
 });
 test("desktop and narrow keyboard-accessible workspace", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/?view=market");
   await page.screenshot({
     path: "docs/evidence/market-desktop.png",
     fullPage: true,

@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 
-test("hosted demo works under its repository path without any backend", async ({
+test("hosted sample works under its repository path without any backend", async ({
   page,
 }) => {
   const apiRequests: string[] = [];
@@ -16,7 +16,7 @@ test("hosted demo works under its repository path without any backend", async ({
   );
   await page.goto("./");
   await expect(
-    page.getByLabel("Presentation demo", { exact: true }),
+    page.getByLabel("Sample data workspace", { exact: true }),
   ).toContainText("synthetic data");
   const source = page.getByRole("combobox", {
     name: "Market data",
@@ -35,7 +35,7 @@ test("hosted demo works under its repository path without any backend", async ({
   await page.getByRole("button", { name: "Create rule", exact: true }).click();
   await page
     .getByLabel("Rule name", { exact: true })
-    .fill("Hosted demo example");
+    .fill("Hosted sample example");
   await page.getByRole("button", { name: "Save rule", exact: true }).click();
   await expect(
     page.getByRole("button", { name: "Send test email", exact: true }),
@@ -61,23 +61,21 @@ test("hosted demo works under its repository path without any backend", async ({
   await page.getByRole("button", { name: "Close dialog", exact: true }).click();
   await page
     .getByRole("button", {
-      name: "Start demo monitoring for Hosted demo example",
+      name: "Start sample monitoring for Hosted sample example",
       exact: true,
     })
     .click();
   await expect(page.getByRole("status")).toContainText("No email is sent");
   await page
-    .getByRole("button", { name: "Advance demo bar", exact: true })
+    .getByRole("button", { name: "Advance sample bar", exact: true })
     .click();
   await page.getByRole("link", { name: "Options lab", exact: true }).click();
   await expect(page.locator(".options-chain-scroll")).toBeVisible();
   await page.getByRole("button", { name: "IV surface", exact: true }).click();
   await expect(page.locator(".surface-plot")).toBeVisible();
-  await page
-    .getByRole("link", { name: "HedgeSignal pilot", exact: true })
-    .click();
+  await page.getByRole("link", { name: "HedgeSignal", exact: true }).click();
   await expect(
-    page.getByRole("heading", { name: "HedgeSignal pilot." }),
+    page.getByRole("heading", { name: "HedgeSignal." }),
   ).toBeVisible();
   await page.reload();
   await expect(source).toHaveValue("demo");
@@ -85,7 +83,7 @@ test("hosted demo works under its repository path without any backend", async ({
     .getByRole("link", { name: "Rules & alerts", exact: false })
     .click();
   await expect(
-    page.getByRole("button", { name: "Hosted demo example v1", exact: true }),
+    page.getByRole("button", { name: "Hosted sample example v1", exact: true }),
   ).toBeVisible();
   await page.setViewportSize({ width: 390, height: 844 });
   await page.emulateMedia({ reducedMotion: "reduce" });

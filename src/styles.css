@@ -2862,3 +2862,6 @@ tbody tr:hover {
     flex-wrap: wrap;
   }
 }
+[hidden] {
+  display: none !important;
+}

@@ -7,7 +7,7 @@ const source = generateBars("brent-dec26", "5m");
 const monitoringRule = (changes: Partial<Rule> = {}): Rule => ({
   id: "monitor-rule",
   version: 1,
-  name: "Demo monitor",
+  name: "Sample monitor",
   instrument: "brent-dec26",
   join: "AND",
   conditions: [
@@ -28,7 +28,7 @@ const monitoringRule = (changes: Partial<Rule> = {}): Rule => ({
   ...changes,
 });
 
-describe("deterministic demo monitor steps", () => {
+describe("deterministic sample monitor steps", () => {
   it("defaults to 5-minute bars and emits only the exact current completed bar", () => {
     const testRule = monitoringRule();
     const current = source[600];

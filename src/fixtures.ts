@@ -22,7 +22,8 @@ export function generateBars(
   timeframe: "5m" | "15m" | "1h",
 ): Bar[] {
   const contract = instruments.find((item) => item.id === instrument);
-  if (!contract) throw new Error("Select one of the supported demo contracts.");
+  if (!contract)
+    throw new Error("Select one of the supported sample contracts.");
   const source: Bar[] = [];
   const origin = Date.UTC(2026, 9, 12, 7);
   let previous = 81.74 + contract.offset;

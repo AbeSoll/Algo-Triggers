@@ -16,13 +16,13 @@ test("corrupt local data has an explicit reset recovery", async ({ page }) => {
       sessionStorage.setItem("injected", "yes");
     }
   });
-  await page.goto("/");
+  await page.goto("/?view=market");
   await expect(page.getByRole("alert")).toContainText("could not be read");
   await page
-    .getByRole("button", { name: "Reset local demo data", exact: true })
+    .getByRole("button", { name: "Reset local sample data", exact: true })
     .click();
   await page
-    .getByRole("button", { name: "Reset demo data", exact: true })
+    .getByRole("button", { name: "Reset sample data", exact: true })
     .click();
   await expect(page.getByRole("alert")).toHaveCount(0);
   await page.getByRole("button", { name: "Create rule", exact: true }).click();
@@ -31,7 +31,7 @@ test("corrupt local data has an explicit reset recovery", async ({ page }) => {
 });
 
 test("storage write failure preserves the unsaved draft", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/?view=market");
   await page.evaluate(() => {
     Storage.prototype.setItem = () => {
       throw new DOMException("Test quota", "QuotaExceededError");
@@ -54,7 +54,7 @@ test("storage write failure preserves the unsaved draft", async ({ page }) => {
 test("a new one-shot monitor starts at activation, not historical fixture start", async ({
   page,
 }) => {
-  await page.goto("/");
+  await page.goto("/?view=market");
   await page.getByRole("button", { name: "Create rule", exact: true }).click();
   await page
     .getByLabel("Rule name", { exact: true })
@@ -70,11 +70,11 @@ test("a new one-shot monitor starts at activation, not historical fixture start"
   await page.getByRole("button", { name: "Save rule", exact: true }).click();
   await page
     .getByRole("button", {
-      name: "Start demo monitoring for One-shot above zero",
+      name: "Start sample monitoring for One-shot above zero",
     })
     .click();
   await page
-    .getByRole("button", { name: "Advance demo bar", exact: true })
+    .getByRole("button", { name: "Advance sample bar", exact: true })
     .click();
   const first = await page.evaluate(
     () =>
@@ -85,7 +85,7 @@ test("a new one-shot monitor starts at activation, not historical fixture start"
   );
   expect(first).toBe(1);
   await page
-    .getByRole("button", { name: "Advance demo bar", exact: true })
+    .getByRole("button", { name: "Advance sample bar", exact: true })
     .click();
   const second = await page.evaluate(
     () =>
@@ -100,7 +100,7 @@ test("a new one-shot monitor starts at activation, not historical fixture start"
     .click();
   await page
     .getByRole("button", {
-      name: "Start demo monitoring for One-shot above zero",
+      name: "Start sample monitoring for One-shot above zero",
       exact: true,
     })
     .click();
@@ -110,7 +110,7 @@ test("a new one-shot monitor starts at activation, not historical fixture start"
 test("EMA values retain full warm-up when the visible range changes", async ({
   page,
 }) => {
-  await page.goto("/");
+  await page.goto("/?view=market");
   await page.getByText("Indicator settings ·", { exact: false }).click();
   await page.getByLabel("Average method", { exact: true }).selectOption("EMA");
   const fiveDay = await page.getByTestId("ma-value-0").innerText();
@@ -121,7 +121,7 @@ test("EMA values retain full warm-up when the visible range changes", async ({
 test("resume preserves cooldown measured from an actual emission", async ({
   page,
 }) => {
-  await page.goto("/");
+  await page.goto("/?view=market");
   await page.getByRole("button", { name: "Create rule", exact: true }).click();
   await page
     .getByLabel("Rule name", { exact: true })
@@ -137,22 +137,22 @@ test("resume preserves cooldown measured from an actual emission", async ({
   await page.getByRole("button", { name: "Save rule", exact: true }).click();
   await page
     .getByRole("button", {
-      name: "Start demo monitoring for Cooldown stays intact",
+      name: "Start sample monitoring for Cooldown stays intact",
     })
     .click();
   await page
-    .getByRole("button", { name: "Advance demo bar", exact: true })
+    .getByRole("button", { name: "Advance sample bar", exact: true })
     .click();
   await page
     .getByRole("button", { name: "Pause Cooldown stays intact", exact: true })
     .click();
   await page
     .getByRole("button", {
-      name: "Start demo monitoring for Cooldown stays intact",
+      name: "Start sample monitoring for Cooldown stays intact",
     })
     .click();
   await page
-    .getByRole("button", { name: "Advance demo bar", exact: true })
+    .getByRole("button", { name: "Advance sample bar", exact: true })
     .click();
   const count = () =>
     page.evaluate(
@@ -167,7 +167,7 @@ test("resume preserves cooldown measured from an actual emission", async ({
   expect(await count()).toBe(1);
   for (let i = 0; i < 5; i++)
     await page
-      .getByRole("button", { name: "Advance demo bar", exact: true })
+      .getByRole("button", { name: "Advance sample bar", exact: true })
       .click();
   expect(await count()).toBe(2);
 });
@@ -175,9 +175,9 @@ test("resume preserves cooldown measured from an actual emission", async ({
 test("malformed stored event evidence recovers without crashing", async ({
   page,
 }) => {
-  await page.goto("/");
+  await page.goto("/?view=market");
   await page
-    .getByRole("button", { name: "Advance demo bar", exact: true })
+    .getByRole("button", { name: "Advance sample bar", exact: true })
     .click();
   await page.evaluate(() => {
     const value = JSON.parse(localStorage.getItem("algo-triggers-demo-v1")!);

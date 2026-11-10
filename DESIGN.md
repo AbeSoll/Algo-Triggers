@@ -32,6 +32,12 @@ components:
 
 # Algo Triggers design system
 
+## Current HedgeSignal team workspace (v0.3)
+
+The default workspace is the server-backed HedgeSignal desk. One Team Member creates, tests, activates and pauses scenarios; there is no role selector or administrator workflow. Monitor, Inputs, and History & email separate the three tasks. React/TypeScript calls the Node service, with SQLite preserving immutable rule versions, observations, events and email status. Optional deployment-token protection remains. Source badges describe synthetic or imported data accurately; Barchart is not connected. No automatic trading is performed. The SRS v0.3 in docs is authoritative.
+
+The research tools described below retain their separate browser-local replay behavior and do not replace the server-backed desk. Their historical verification evidence does not certify the new desk.
+
 ## Overview
 
 The North Star is an analyst's daylight research desk: an expansive paper-like chart, a dark instrument rail, and compact annotation cards. Market-literate users create and inspect signals. This is a product workspace, not a promotional trading website. English interface; international Brent research audience. No Japan-market or local regulatory claims are implied.
@@ -66,7 +72,7 @@ Shared styles own buttons, native select/input fields, badges, panel headers, ta
 
 The shared `Modal` owns dialog focus, Escape and restoration. One status region owns feedback. Charts have data alternatives and keyboard zoom controls. Native buttons with `aria-pressed` switch local chart modes; route links use `aria-current`. The demo provides no full custom ARIA tab widget.
 
-Content uses precise action verbs: Create rule, Save rule, Test rule, Run test, Inspect event, Start demo monitoring. Futures prices show USD/bbl; Yahoo oil fund options show USD/share. Historical counts never imply profitability. An explicit source selector distinguishes Yahoo snapshots from synthetic samples; rule tests and monitoring remain synthetic. Motion is limited to short feedback and an optional loading spinner; reduced motion stops animations.
+Content uses precise action verbs: Create rule, Save rule, Test rule, Run test, Inspect event, Start sample monitoring. Futures prices show USD/bbl; Yahoo oil fund options show USD/share. Historical counts never imply profitability. An explicit source selector distinguishes Yahoo snapshots from synthetic samples; rule tests and monitoring remain synthetic. Motion is limited to short feedback and an optional loading spinner; reduced motion stops animations.
 
 ## Do's and Don'ts
 
@@ -81,14 +87,14 @@ The primary rule journey uses three templates: price level, percentage move and 
 
 Market indicator settings use a native disclosure, with the active method and periods in its summary. Saved rules keep Test rule and monitoring controls on the primary action line, with quieter Edit and Duplicate buttons always available below. The action layout stays stable without expanding disclosures. Test results lead with the alert count; evaluation statistics and exact condition values are available on demand.
 
-Options Lab shows one task at a time: premiums, strategy construction or volatility. Switching these views retains the current strategy edits. Greeks are optional in both the chain and inspected quote. Source labels identify observed Yahoo snapshots, explicit demo samples, loading or unavailable states; no source rights or exchange equivalence are implied by this UI.
+Options Lab shows one task at a time: premiums, strategy construction or volatility. Switching these views retains the current strategy edits. Greeks are optional in both the chain and inspected quote. Source labels identify observed Yahoo snapshots, explicit synthetic samples, loading or unavailable states; no source rights or exchange equivalence are implied by this UI.
 
 ## Market data provenance
 
-`DataSourceNotice` owns source, provider observation time, fetch time, age and unverified delay across market views. A successful HTTP response or healthy local server never proves market connectivity. Yahoo mode never substitutes synthetic bars or quotes. Missing inputs remain unavailable, with a retry action; the separate Demo samples mode is deliberate and persistent. Quote age describes the supplied observation time, not a promise of market freshness or exchange-open status.
+`DataSourceNotice` owns source, provider observation time, fetch time, age and unverified delay across market views. A successful HTTP response or healthy local server never proves market connectivity. Yahoo mode never substitutes synthetic bars or quotes. Missing inputs remain unavailable, with a retry action; the separate Synthetic samples mode is deliberate and persistent. Quote age describes the supplied observation time, not a promise of market freshness or exchange-open status.
 
 Option views identify BNO/USO as fund options, with USD/share units and per-expiry requests. Yahoo Greeks are unavailable until a verified pricing model exists. The observed-IV view shows only the selected expiry's supplied IV; the illustrative multi-expiry mesh remains demo-only. Rule tests, monitoring and event evidence always name their synthetic dataset regardless of the market display source.
 
 ## Hosted presentation demo
 
-The Pages build is a separate demo-only deployment. A persistent shared provenance notice names synthetic data, browser-local storage and unavailable live/email services. The source selector is locked to Demo samples, including when an old Yahoo preference exists. Monitoring remains manual sample playback and never calls the email API. Email and live-price check buttons are disabled with an associated explanation. Standard local builds retain their existing server behavior.
+The Pages build is a separate demo-only deployment. A persistent shared provenance notice names synthetic data, browser-local storage and unavailable live/email services. The source selector is locked to Synthetic samples, including when an old Yahoo preference exists. Monitoring remains manual sample playback and never calls the email API. Email and live-price check buttons are disabled with an associated explanation. Standard local builds retain their existing server behavior.
